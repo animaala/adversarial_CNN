@@ -1,6 +1,6 @@
 ## Welcome to the Traffic Sign dataset
 
-### The data is split 7 to 1 between ```/train``` and ```/validation```. This is delibrately similar to the 6 to 1 split of the MNIST dataset to reduce risk of imbalance.
+The data is split 9 to 1 between ```/train``` and ```/validation```. This is slightly higher than the 6 to 1 split of the MNIST dataset to reduce risk of imbalance. Later in the project I will be putting some data augmentation techniques in the model to expand the number of examples.
 
 
 I set up some directories to contain training and validation data, for each of our two classes (go , stop)
