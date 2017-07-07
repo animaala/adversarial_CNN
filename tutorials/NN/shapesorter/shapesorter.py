@@ -60,7 +60,7 @@ def getImage(filename):
     image = tf.image.rgb_to_grayscale(image)
     # the below line would create a tensor of shape (?,?,1)
     # shape [2,2,3] = [[[1, 1, 1], [2, 2, 2]], [[3, 3, 3], [4, 4, 4]]]
-    print(image)
+
     image=tf.reshape(1-image, [height*width])
 
     # re-define label as a "one-hot" vector
@@ -77,7 +77,6 @@ sess = tf.InteractiveSession()
 # a single example in the training data file
 label, image = getImage("data/train-00000-of-00001")
 
-p = tf.Print(image, [width*height])
 
 # and similarly for the validation data
 vlabel, vimage = getImage("data/validation-00000-of-00001")
@@ -193,8 +192,7 @@ else:
   
   # reduce overfitting by applying dropout
   # each neuron is kept with probability keep_prob
-  # keep_prob = tf.placeholder(tf.float32)
-  keep_prob = 0.75
+  keep_prob = tf.placeholder(tf.float32)
   h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
   
   # create readout layer which outputs to nClass categories
@@ -239,16 +237,14 @@ for i in range(nSteps):
 
 
     # run the training step with feed of images
-    train_step.run(feed_dict={x: batch_xs, y_: batch_ys})
-
-    p.eval()
+    train_step.run(feed_dict={x: batch_xs, y_: batch_ys, keep_prob: 0.5})
 
     if (i + 1) % 100 == 0:  # then perform validation
 
         # get a validation batch
         vbatch_xs, vbatch_ys = sess.run([vimageBatch, vlabelBatch])
 
-        train_accuracy = accuracy.eval(feed_dict={x: vbatch_xs, y_: vbatch_ys})
+        train_accuracy = accuracy.eval(feed_dict={x: vbatch_xs, y_: vbatch_ys, keep_prob: 1.0})
 
         print("step %d, training accuracy %g" % (i + 1, train_accuracy))
 
