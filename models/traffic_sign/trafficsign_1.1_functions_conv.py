@@ -118,9 +118,9 @@ with tf.name_scope("inputs"):
     lr = tf.placeholder(tf.float32, name="learning_rate")
     # Probability of keeping a node during dropout = 1.0 at test time (no dropout) and 0.75 at training time
     keep_prob = tf.placeholder(tf.float32, name="dropout_prob")
+    tf.summary.image("input", X, 4)
 
-
-def conv_layer(input, kernel_shape, scope_name):
+def conv_relu_layer(input, kernel_shape, scope_name):
     """
     Represents one layer of convolution on some input image.
     Creates and initializes wieghts in the shape of 'kernel_shape', this is the filter we pass over the image.
@@ -133,13 +133,16 @@ def conv_layer(input, kernel_shape, scope_name):
     """
     with tf.variable_scope(scope_name):
         w = tf.get_variable("weights", kernel_shape, tf.float32,
-                            tf.truncated_normal_initializer(mean=0.03, stddev=0.01))
+                            tf.truncated_normal_initializer(stddev=0.1))
         bias_shape = w.get_shape().as_list()[-1]
         b = tf.get_variable("biases", bias_shape, tf.float32,
                             tf.constant_initializer(0.1))
         conv = tf.nn.conv2d(input, w, strides=[1, 1, 1, 1], padding="SAME")
         act = tf.nn.relu((conv + b))
-        return tf.nn.max_pool(act, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+        tf.summary.histogram("w", w)
+        tf.summary.histogram("b", b)
+        tf.summary.histogram("activations", act)
+        return act
 
 
 def fc_layer(input, weights_shape, scope_name):
@@ -155,7 +158,7 @@ def fc_layer(input, weights_shape, scope_name):
                             tf.truncated_normal_initializer(0.03, 0.01))
         n = w.get_shape().as_list()[-1]
         b = tf.get_variable("biases", [n])
-        return tf.nn.relu(tf.matmul(input, w) + b)
+        return tf.matmul(input, w) + b
 
 
 def model():
@@ -170,13 +173,21 @@ def model():
     K = 24  # first convolutional layer output depth
     L = 48  # second convolutional layer output depth
     M = 64  # third convolutional layer
-    N = 200  # fully connected layer
-    conv1 = conv_layer(X, [5, 5, NUM_CHANNELS, K], "conv1")
-    conv2 = conv_layer(conv1, [5, 5, K, L], "conv2")
-    conv3 = conv_layer(conv2, [3, 3, L, M], "conv3")
-    flattened = tf.reshape(conv3, shape=[-1, 9 * 9 * M])
-    fc_layer1 = fc_layer(flattened, [9 * 9 * M, N], "fc1")
+    N = 512  # fully connected layer
+    # 72x72 images
+    conv1 = conv_relu_layer(X, [5, 5, NUM_CHANNELS, K], "conv1")
+    pool1 = tf.nn.max_pool(conv1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+    # 36x36 images
+    conv2 = conv_relu_layer(pool1, [5, 5, K, L], "conv2")
+    pool2 = tf.nn.max_pool(conv2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+    # 18x18 images
+    conv3 = conv_relu_layer(pool2, [3, 3, L, M], "conv3")
+
+    flattened = tf.reshape(conv3, shape=[-1, 18 * 18 * M])
+
+    fc_layer1 = tf.nn.relu(fc_layer(flattened, [18 * 18 * M, N], "fc1"))
     dropped = tf.nn.dropout(fc_layer1, keep_prob)
+
     logits = fc_layer(dropped, [N, NUM_CLASSES], "fc2")
     Y = tf.nn.softmax(logits)
     return Y, logits
@@ -188,17 +199,17 @@ Y, Ylogits = model()
 # cross-entropy loss function (= -sum(Y_i * log(Yi)) ), normalised for batches of 50 images
 # TensorFlow provides the softmax_cross_entropy_with_logits function to avoid numerical stability
 # problems with log(0) which is NaN
-with tf.name_scope("loss_function"):
+with tf.name_scope("x-ent"):
     cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=Ylogits, labels=Y_)
-    cross_entropy = tf.reduce_mean(cross_entropy) * 50
-
+    cross_entropy = tf.reduce_mean(cross_entropy) * 64
+    tf.summary.scalar("x-ent", cross_entropy)
 # accuracy of the trained model, between 0 (worst) and 1 (best)
 with tf.name_scope("accuracy"):
     correct_prediction = tf.equal(tf.argmax(Y, 1), tf.argmax(Y_, 1))
     accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-
+    tf.summary.scalar("accuracy", accuracy)
 # training step, the learning rate is a placeholder
-with tf.name_scope("optimization"):
+with tf.name_scope("train"):
     train_step = tf.train.AdamOptimizer(lr).minimize(cross_entropy)
 
 # interactive session allows interleaving of building and running steps
@@ -210,17 +221,20 @@ sess.run(tf.global_variables_initializer())
 coord = tf.train.Coordinator()
 threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-writer = tf.summary.FileWriter("./traffic_graph", sess.graph)
+writer = tf.summary.FileWriter("./traffic_graph/1.1", sess.graph)
+merged_summary = tf.summary.merge_all()
 
 # start training
-nSteps = 1000
+nSteps = 2000
 for i in range(nSteps):
 
     # get a batch of images
     batch_xs, batch_ys = sess.run([imageBatch, labelBatch])
     # Run the training step with a feed of images
+    if i % 5 == 0:
+        s = sess.run(merged_summary, feed_dict={X: batch_xs, Y_: batch_ys, lr: 0.01, keep_prob: 0.5})
+        writer.add_summary(s, i)
     train_step.run(feed_dict={X: batch_xs, Y_: batch_ys, lr: 0.01, keep_prob: 0.5})
-#    p.eval()
 
     if (i + 1) % 100 == 0:  # then perform validation
 

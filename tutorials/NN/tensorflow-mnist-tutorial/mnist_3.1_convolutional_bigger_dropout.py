@@ -75,8 +75,8 @@ Y3 = tf.nn.relu(tf.nn.conv2d(Y2, W3, strides=[1, stride, stride, 1], padding='SA
 
 # reshape the output from the third convolution for the fully connected layer
 YY = tf.reshape(Y3, shape=[-1, 7 * 7 * M])
-
 Y4 = tf.nn.relu(tf.matmul(YY, W4) + B4)
+
 YY4 = tf.nn.dropout(Y4, pkeep)
 Ylogits = tf.matmul(YY4, W5) + B5
 Y = tf.nn.softmax(Ylogits)
