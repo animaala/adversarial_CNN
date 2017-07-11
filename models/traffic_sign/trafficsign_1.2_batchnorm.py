@@ -27,6 +27,12 @@ HEIGHT = 72
 # Number of channels in each image, 3 channels: Red, Green, Blue.
 NUM_CHANNELS = 3
 
+# Constants describing the training process.
+MOVING_AVERAGE_DECAY = 0.9999     # The decay to use for the moving average.
+NUM_EPOCHS_PER_DECAY = 350.0      # Epochs after which learning rate decays.
+LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
+INITIAL_LEARNING_RATE = 0.1       # Initial learning rate.
+
 
 # Function to read a single image from input file
 def get_image(filename, name="get_image"):
@@ -116,9 +122,37 @@ with tf.name_scope("inputs"):
     Y_ = tf.placeholder(tf.float32, [None, NUM_CLASSES], name="labels")
     # variable learning rate
     lr = tf.placeholder(tf.float32, name="learning_rate")
+    # test flag for batch norm
+    tst = tf.placeholder(tf.bool)
+    iter = tf.placeholder(tf.int32)
     # Probability of keeping a node during dropout = 1.0 at test time (no dropout) and 0.75 at training time
     pkeep = tf.placeholder(tf.float32, name="dropout_prob")
+    pkeep_conv = tf.placeholder(tf.float32)
     tf.summary.image("input", X, 4)
+
+
+def batchnorm(Ylogits, is_test, iteration, offset, convolutional=False):
+    exp_moving_avg = tf.train.ExponentialMovingAverage(0.999, iteration) # adding the iteration prevents from averaging across non-existing iterations
+    bnepsilon = 1e-5
+    if convolutional:
+        mean, variance = tf.nn.moments(Ylogits, [0, 1, 2])
+    else:
+        mean, variance = tf.nn.moments(Ylogits, [0])
+    update_moving_everages = exp_moving_avg.apply([mean, variance])
+    m = tf.cond(is_test, lambda: exp_moving_avg.average(mean), lambda: mean)
+    v = tf.cond(is_test, lambda: exp_moving_avg.average(variance), lambda: variance)
+    Ybn = tf.nn.batch_normalization(Ylogits, m, v, offset, None, bnepsilon)
+    return Ybn, update_moving_everages
+
+
+def no_batchnorm(Ylogits, is_test, iteration, offset):
+    return Ylogits, tf.no_op()
+
+
+def compatible_convolutional_noise_shape(Y):
+    noiseshape = tf.shape(Y)
+    noiseshape = noiseshape * tf.constant([1, 0, 0, 1]) + tf.constant([0, 1, 1, 0])
+    return noiseshape
 
 
 def conv_layer(input, kernel, scope_name):
@@ -134,32 +168,6 @@ def conv_layer(input, kernel, scope_name):
         conv = tf.nn.conv2d(input, kernel, strides=[1, 1, 1, 1], padding="SAME")
         tf.summary.histogram("kernel", kernel)
         return conv
-
-
-def visualize_convolutions(W1):
-    kernel_size = W1.get_shape().as_list()[1]
-    in_channels = W1.get_shape().as_list()[2]
-    out_channels = W1.get_shape().as_list()[-1]
-    # [kernel_size, kernel_size, in_channels, out_channels]
-
-    # example first layer
-    W1_a = W1  # [6, 6, 3, 64]
-    W1_b = tf.split(W1_a, 64, 3)  # 64 x [6, 6, 3, 1]
-
-
-    W1_row0 = tf.concat(W1_b[0:8], 0)  # 8 x [6, 6, 3, 1]
-    W1_row1 = tf.concat(W1_b[8:16], 0)  # 8 x [6, 6, 3, 1]
-    W1_row2 = tf.concat(W1_b[16:24], 0)  # 8 x [6, 6, 3, 1]
-    W1_row3 = tf.concat(W1_b[24:32], 0)  # 8 x [6, 6, 3, 1]
-    W1_row4 = tf.concat(W1_b[32:40], 0)  # 8 x [6, 6, 3, 1]
-    W1_row5 = tf.concat(W1_b[40:48], 0)  # 8 x [6, 6, 3, 1]
-    W1_row6 = tf.concat(W1_b[48:56], 0)  # 8 x [6, 6, 3, 1]
-    W1_row7 = tf.concat(W1_b[56:64], 0)  # 8 x [6, 6, 3, 1]
-
-    W1_d = tf.concat([W1_row0, W1_row1, W1_row2, W1_row3, W1_row4, W1_row5, W1_row6, W1_row7], 1)  # [30, 30, 3, 1]
-    print(tf.shape(W1_d))
-    W1_e = tf.reshape(W1_d, [64, 6, 6, 3])
-    tf.summary.image("kernel_images", W1_e, 16)
 
 
 def model():
@@ -198,43 +206,47 @@ def model():
         with tf.name_scope("first_layer"):
             # 72x72 images
             Y1l = conv_layer(X, W1, "conv1")
-            Y1r = tf.nn.relu(Y1l)
-            visualize_convolutions(W1)
             # 36x36 images after max_pool
-            Y1p = tf.nn.max_pool(Y1r, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-            Y1 = tf.nn.dropout(Y1p, pkeep)
+            Y1p = tf.nn.max_pool(Y1l, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+            Y1bn, update_ema1 = batchnorm(Y1p, tst, iter, B1, convolutional=True)
+            Y1r = tf.nn.relu(Y1bn)
+            Y1 = tf.nn.dropout(Y1r, pkeep_conv, compatible_convolutional_noise_shape(Y1r))
 
         with tf.name_scope("second_layer"):
             Y2l = conv_layer(Y1, W2, "conv2")
-            Y2r = tf.nn.relu(Y2l)
- #           visualize_convolutions(Y2r)
             # 18x18 images after max_pool
-            Y2p = tf.nn.max_pool(Y2r, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-            Y2 = tf.nn.dropout(Y2p, pkeep)
+            Y2p = tf.nn.max_pool(Y2l, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+            Y2bn, update_ema2 = batchnorm(Y2p, tst, iter, B2, convolutional=True)
+            Y2r = tf.nn.relu(Y2bn)
+            Y2 = tf.nn.dropout(Y2r, pkeep_conv, compatible_convolutional_noise_shape(Y2r))
 
         with tf.name_scope("third_layer"):
             Y3l = conv_layer(Y2, W3, "conv3")
-            Y3r = tf.nn.relu(Y3l)
-#            visualize_convolutions(Y3r)
             # 9x9 images after max_pool
-            Y3p = tf.nn.max_pool(Y3r, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-            Y3 = tf.nn.dropout(Y3p, pkeep)
+            Y3p = tf.nn.max_pool(Y3l, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+            Y3bn, update_ema3 = batchnorm(Y3p, tst, iter, B3, convolutional=True)
+            Y3r = tf.nn.relu(Y3bn)
+            Y3 = tf.nn.dropout(Y3r, pkeep_conv, compatible_convolutional_noise_shape(Y3r))
 
         with tf.name_scope("fourth_layer"):
             Y4l = conv_layer(Y3, W4, "conv4")
-            Y4r = tf.nn.relu(Y4l)
-  #          visualize_convolutions(Y4r)
             # 5x5 images after max_pool
-            Y4p = tf.nn.max_pool(Y4r, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-            Y4 = tf.nn.dropout(Y4p, pkeep)
+            Y4p = tf.nn.max_pool(Y4l, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+            Y4bn, update_ema4 = batchnorm(Y4p, tst, iter, B4, convolutional=True)
+            Y4r = tf.nn.relu(Y4bn)
+            Y4 = tf.nn.dropout(Y4r, pkeep_conv, compatible_convolutional_noise_shape(Y4r))
 
         with tf.name_scope("fc_layer"):
             YY = tf.reshape(Y4, shape=[-1, 5 * 5 * M])
             Y5l = tf.matmul(YY, W5)
-            Y5r = tf.nn.relu(Y5l)
+            print(Y5l)
+            Y5bn, update_ema5 = batchnorm(Y5l, tst, iter, B5)
+            Y5r = tf.nn.relu(Y5bn)
             Y5 = tf.nn.dropout(Y5r, pkeep)
             Ylogits = tf.matmul(Y5, W6) + B6
             Y = tf.nn.softmax(Ylogits)
+
+            update_ema = tf.group(update_ema1, update_ema2, update_ema3, update_ema4, update_ema5)
 
         return Y, Ylogits
 
@@ -242,7 +254,7 @@ def model():
 Y, Ylogits = model()
 
 
-# cross-entropy loss function (= -sum(Y_i * log(Yi)) ), normalised for batches of 50 images
+# cross-entropy loss function (= -sum(Y_i * log(Yi)) ), normalised for batches of 64 images
 # TensorFlow provides the softmax_cross_entropy_with_logits function to avoid numerical stability
 # problems with log(0) which is NaN
 with tf.name_scope("x-ent"):
@@ -276,22 +288,24 @@ merged_summary = tf.summary.merge_all()
 nSteps = 2000
 for i in range(nSteps):
 
-
+    # get a batch of images
     batch_xs, batch_ys = sess.run([imageBatch, labelBatch])
-
-    s, k = sess.run([merged_summary, train_step], feed_dict={X: batch_xs, Y_: batch_ys, lr: 0.01, pkeep: 0.5})
-    writer.add_summary(s, i)
+    # Run the training step with a feed of images
+    if i % 5 == 0:
+        s = sess.run(merged_summary, feed_dict={X: batch_xs, Y_: batch_ys, lr: 0.003, pkeep: 0.5})
+        writer.add_summary(s, i)
+ #   train_step.run(feed_dict={X: batch_xs, Y_: batch_ys, lr: 0.01, pkeep: 0.5})
 
     if (i + 1) % 100 == 0:  # then perform validation
 
         # get a validation batch
         vbatch_xs, vbatch_ys = sess.run([vimageBatch, vlabelBatch])
-        train_accuracy = accuracy.eval(feed_dict={X: vbatch_xs, Y_: vbatch_ys, lr: 0.01, pkeep: 1.0})
+        train_accuracy = accuracy.eval(feed_dict={X: vbatch_xs, Y_: vbatch_ys, lr: 0.003, pkeep: 1.0})
 
         print("step %d, training accuracy %g" % (i + 1, train_accuracy))
+
 
 
 # finalise
 coord.request_stop()
 coord.join(threads)
-
