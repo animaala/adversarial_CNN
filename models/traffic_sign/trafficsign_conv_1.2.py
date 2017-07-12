@@ -1,10 +1,17 @@
 ########################################################################
 #
-# Have some documentation here
+# A Convolutional Neural Network binary classifier implementation designed
+# to work with a custom road traffic sign data set.
+#
 #
 # Implemented in Python 3.5, TF v1.1, CuDNN 5.1
 #
 # Ryan Halliburton 2017
+#
+# This project is available at the following 2 repositories:
+# 1. https://github.com/animaala/adversarial_ML
+# 2. https://gitlab.ncl.ac.uk/securitylab/adversarial_ML.git
+#
 ########################################################################
 
 import tensorflow as tf
@@ -15,8 +22,25 @@ print("Tensorflow version " + tf.__version__)
 logging.set_verbosity(logging.INFO)
 
 ########################################################################
+# neural network structure:
+#
+# · · · · · · · · ·       (input data, 1-deep)                 X   [batch, 72, 72, 3]
+# @ @ @ @ @ @ @ @ @    -- conv. layer 7x7x3=>128 stride 1      W1  [7, 7, 3, 128]         B1 [128]
+#   :::::::::::::      -- max pool 3x3 stride 3                Y1  [batch, 24, 24, 128]
+#   @ @ @ @ @ @ @      -- conv. layer 5x5x128=>172 stride 1    W2  [5, 5, 128, 172]       B2 [172]
+#     :::::::::        -- max pool 3x3 stride 3                Y2  [batch, 8, 8, 172]
+#                                               => reshaped to YY  [batch, 8*8*172]
+#     \x/x\x\x/ ✞      -- fully connected layer (relu+dropout) W3  [8*8*172, 1536]        B3 [1536]
+#      · · · ·                                                 Y3  [batch, 1536]
+#      \x/x\x/         -- fully connected layer (softmax)      W4  [1536, 2]              B4 [2]
+#       · · ·                                                   Y  [batch, 2]
+#
+########################################################################
 
 # Various constants for describing the data set
+
+# location of the data set: a TFRecord file
+DATA_PATH = "../../dataset/traffic_sign/"
 
 # number of classes is 2 (go and stop)
 NUM_CLASSES = 2
@@ -28,10 +52,15 @@ HEIGHT = 72
 # Number of channels in each image, 3 channels: Red, Green, Blue.
 NUM_CHANNELS = 3
 
+# batch size for training/validating network
+BATCH_SIZE = 64
+
+########################################################################
+
 
 def get_image(filename, name="get_image"):
-    """
-    Preprocessing function which sets up a queue for a TFRecord reader. Retrieves an image, decodes it, converts dtype
+    """Preprocessing function which sets up a queue for a TFRecord reader.
+    Retrieves an image, decodes it, converts dtype
     to float and sets the label to a one hot tensor.
     :param filename: The location of the TFRecord file
     :param name: The name_scope of the function call
@@ -86,8 +115,8 @@ def get_image(filename, name="get_image"):
 
 
 def distort_colour(image):
-    """Distort the color of the image.
-    Each color distortion is non-commutative and thus ordering of the color ops
+    """Distort the colour of the image.
+    Each colour distortion is non-commutative and thus ordering of the colour ops
     matters. This effectively expands the data set to an unlimited number of examples
     :param image: Tensor containing a single image
     :return: Tensor containing the colour distorted image
@@ -98,30 +127,30 @@ def distort_colour(image):
             pass
         elif ordering == 2:
             image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
-            image = tf.image.random_brightness(image, max_delta=0.20)
+            image = tf.image.random_brightness(image, max_delta=0.12)
             image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
             image = tf.image.random_hue(image, max_delta=0.1)
         elif ordering == 3:
-            image = tf.image.random_brightness(image, max_delta=0.20)
+            image = tf.image.random_brightness(image, max_delta=0.12)
             image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
             image = tf.image.random_hue(image, max_delta=0.1)
             image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
         elif ordering == 4:
             image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
-            image = tf.image.random_brightness(image, max_delta=0.20)
+            image = tf.image.random_brightness(image, max_delta=0.12)
             image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
         elif ordering == 5:
             image = tf.image.random_hue(image, max_delta=0.1)
             image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
             image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
         elif ordering == 6:
-            image = tf.image.random_brightness(image, max_delta=0.20)
+            image = tf.image.random_brightness(image, max_delta=0.12)
             image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
         elif ordering == 7:
             image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
-            image = tf.image.random_brightness(image, max_delta=0.20)
+            image = tf.image.random_brightness(image, max_delta=0.12)
         elif ordering == 8:
-            image = tf.image.random_brightness(image, max_delta=0.20)
+            image = tf.image.random_brightness(image, max_delta=0.12)
         elif ordering == 9:
             image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
         elif ordering == 10:
@@ -131,18 +160,17 @@ def distort_colour(image):
     return image
 
 
-
 # "label" and "image" are associated with corresponding feature from a single example in the training data file
 # at this point label is one hot vector. If label = 1 then [1,0]... if label = 2 then [0,1]
 # (and yes that's opposite to binary!)
 # use CPU to preprocess individual images to save GPU for feed forward / backpropagation
 with tf.device('/cpu:0'):
-    label, image = get_image("../../dataset/traffic_sign/train-00000-of-00001")
+    label, image = get_image(DATA_PATH + "train-00000-of-00001")
     # chance to distort the image
     image = distort_colour(image)
     # and similarly for the validation data
-    vlabel, vimage = get_image("../../dataset/traffic_sign/validation-00000-of-00001")
-
+    vlabel, vimage = get_image(DATA_PATH + "validation-00000-of-00001")
+#   vimage = distort_colour(vimage)
 
 # associate "label_batch" and "image_batch" objects with a randomly selected batch of labels and images respectively
 # train.shuffle_batch creates batches by randomly shuffling tensors. Adds to the current graph:
@@ -152,14 +180,14 @@ with tf.device('/cpu:0'):
 with tf.name_scope("shuffle_batch"):
     imageBatch, labelBatch = tf.train.shuffle_batch(
         [image, label],
-        batch_size=64,
+        batch_size=BATCH_SIZE,
         capacity=220,
         min_after_dequeue=60)
 
     # and similarly for the validation data
     vimageBatch, vlabelBatch = tf.train.shuffle_batch(
         [vimage, vlabel],
-        batch_size=64,
+        batch_size=BATCH_SIZE,
         capacity=220,
         min_after_dequeue=15)
 
@@ -174,47 +202,35 @@ with tf.name_scope("inputs"):
     lr = tf.placeholder(tf.float32, name="learning_rate")
     # Probability of keeping a node during dropout = 1.0 at test time (no dropout) and 0.75 at training time
     pkeep = tf.placeholder(tf.float32, name="dropout_prob")
-    tf.summary.image("input", X, 4)
+    tf.summary.image("input/image", X, 3)
 
 
-# def visualize_kernel(W1):
-#     kernel_size = W1.get_shape().as_list()[1]
-#     in_channels = W1.get_shape().as_list()[2]
-#     out_channels = W1.get_shape().as_list()[-1]
-#     # [kernel_size, kernel_size, in_channels, out_channels]
-#
-#     # example first layer
-#     W1_a = W1  # [7, 7, 3, 128]
-#     W1_b = tf.split(W1_a, out_channels, 3)  # 128 x [7, 7, 3, 1]
-#
-#     W1_row0 = tf.concat(W1_b[0:8], 0)    # 8 x [6, 6, 3, 1] or [48, 6, 3, 1]
-#     W1_row1 = tf.concat(W1_b[8:16], 0)   # [48, 6, 3, 1]
-#     W1_row2 = tf.concat(W1_b[16:24], 0)  # [48, 6, 3, 1]
-#     W1_row3 = tf.concat(W1_b[24:32], 0)  # [48, 6, 3, 1]
-#     W1_row4 = tf.concat(W1_b[32:40], 0)  # [48, 6, 3, 1]
-#     W1_row5 = tf.concat(W1_b[40:48], 0)  # [48, 6, 3, 1]
-#     W1_row6 = tf.concat(W1_b[48:56], 0)  # [48, 6, 3, 1]
-#     W1_row7 = tf.concat(W1_b[56:64], 0)  # [48, 6, 3, 1]
-#
-#     W1_d = tf.concat([W1_row0, W1_row1, W1_row2, W1_row3, W1_row4, W1_row5, W1_row6, W1_row7], 1)  # [30, 30, 3, 1]
-#     print(tf.shape(W1_d))
-#     W1_e = tf.reshape(W1_d, [out_channels, kernel_size, kernel_size, 3])
-#     tf.summary.image("kernel_images", W1_e, 4)
+def visualize_kernel(W):
+    with tf.variable_scope('kernel_visualisation'):
+        # scale weights to [0 1], type is still float
+        x_min = tf.reduce_min(W)
+        x_max = tf.reduce_max(W)
+        W_0_to_1 = (W - x_min) / (x_max - x_min)
+
+        # to tf.image_summary format [batch_size, height, width, channels]
+        kernel_transposed = tf.transpose(W_0_to_1, [3, 0, 1, 2])
+
+        # this will display random 3 filters from the 128 in conv1
+        tf.summary.image('conv1/filters', kernel_transposed, 3)
 
 
 def model():
-    """
-    The convolutional model: 3 conv layers with kernel shape [filter_height, filter_width, in_channels, out_channels]
+    """The convolutional model: 2 conv layers with kernel shape [filter_height, filter_width, in_channels, out_channels]
     and 2 fully connected layers, one to bring all the activation maps together (outputs of all the filters) and one
-    final layer to predict a class
+    final softmax layer to predict the class
     :return: The predictions Y and the logits
     """
     with tf.variable_scope("the_model"):
-        # three convolutional layers with their channel counts, and a
+        # 2 convolutional layers with their channel counts, and a
         # fully connected layer (the last layer has 2 softmax neurons for "stop" and "go")
-        J = 128  # 2nd convolutional layer output channels
-        K = 172  # 3rd convolutional layer output channels
-        N = 1536 # fully connected layer
+        J = 128   # 1st convolutional layer output channels
+        K = 172   # 2nd convolutional layer output channels
+        N = 1536  # fully connected layer
 
         # weights / kernels
         # 7x7 patch, 3 input channel, J output channels
@@ -223,14 +239,13 @@ def model():
         W3 = tf.Variable(tf.truncated_normal([8 * 8 * K, N], stddev=0.1))
         W4 = tf.Variable(tf.truncated_normal([N, NUM_CLASSES], stddev=0.1))
 
-     #   visualize_kernel(W1)
-
         # biases
         B1 = tf.Variable(tf.constant(0.1, tf.float32, [J]))
         B2 = tf.Variable(tf.constant(0.1, tf.float32, [K]))
         B3 = tf.Variable(tf.constant(0.1, tf.float32, [N]))
         B4 = tf.Variable(tf.constant(0.1, tf.float32, [NUM_CLASSES]))
 
+        visualize_kernel(W1)
 
         with tf.name_scope("first_layer"):
             # 72x72 images
@@ -284,8 +299,8 @@ sess.run(tf.global_variables_initializer())
 coord = tf.train.Coordinator()
 threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-writer = tf.summary.FileWriter("./traffic_graph/1.2", sess.graph)
-merged_summary = tf.summary.merge_all()
+writer = tf.summary.FileWriter("./traffic_graph/main", sess.graph)
+summary = tf.summary.merge_all()
 
 # start training
 nSteps = 2000
@@ -294,19 +309,25 @@ for i in range(nSteps):
     batch_xs, batch_ys = sess.run([imageBatch, labelBatch])
 
     # train_step is the backpropagation step. Running this op allows the network to learn the distribution of the data
-    s, k = sess.run([merged_summary, train_step], feed_dict={X: batch_xs, Y_: batch_ys, lr: 0.0008, pkeep: 0.5})
-    writer.add_summary(s, i)
+    sess.run([train_step], feed_dict={X: batch_xs, Y_: batch_ys, lr: 0.0008, pkeep: 0.5})
+
+    if (i + 1) % 50 == 0:  # work out training accuracy and log summary info for tensorboard
+        train_acc, s = sess.run([accuracy, summary], feed_dict={X: batch_xs, Y_: batch_ys, lr: 0.0008, pkeep: 0.5})
+        writer.add_summary(s, i)
+        print("step %d, training accuracy %g" % (i + 1, train_acc))
 
     if (i + 1) % 100 == 0:  # then perform validation
 
         # get a validation batch and calculate the accuracy of the predictions
         # note accuracy.eval() is equivalent to sess.run(accuracy)
         vbatch_xs, vbatch_ys = sess.run([vimageBatch, vlabelBatch])
-        train_accuracy = accuracy.eval(feed_dict={X: vbatch_xs, Y_: vbatch_ys, lr: 0.0008, pkeep: 1.0})
+        test_acc = accuracy.eval(feed_dict={X: vbatch_xs, Y_: vbatch_ys, lr: 0.0008, pkeep: 1.0})
 
-        print("step %d, training accuracy %g" % (i + 1, train_accuracy))
+        print("step %d, test accuracy %g" % (i + 1, test_acc))
 
 
 # finalise
+writer.close()
 coord.request_stop()
 coord.join(threads)
+
