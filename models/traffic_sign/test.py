@@ -2,6 +2,6 @@ import tensorflow as tf
 import numpy as np
 
 
-print(np.random.random_integers(5))
+ordering = np.random.random_integers(2)
 
-
+print(ordering)

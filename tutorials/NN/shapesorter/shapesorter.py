@@ -70,6 +70,32 @@ def getImage(filename):
 
     return label, image
 
+
+def visualize_convolutions(W1):
+    kernel_size = W1.get_shape().as_list()[1]
+    in_channels = W1.get_shape().as_list()[2]
+    out_channels = W1.get_shape().as_list()[-1]
+    # [kernel_size, kernel_size, in_channels, out_channels]
+
+    # example first layer
+    W1_a = W1  # [5, 5, 1, 32]
+    W1pad = tf.zeros([5, 5, 1, 4])  # four zero kernels for padding
+    W1_b = tf.concat([W1_a, W1pad], 3)
+    W1_c = tf.split(W1_b, 36, 3)  # 64 x [6, 6, 3, 1]
+
+    W1_row0 = tf.concat(W1_c[0:6], 0)  # [30, 5, 3, 1]
+    W1_row1 = tf.concat(W1_c[6:12], 0)  # [30, 5, 3, 1]
+    W1_row2 = tf.concat(W1_c[12:18], 0)  # [30, 5, 3, 1]
+    W1_row3 = tf.concat(W1_c[18:24], 0)  # [30, 5, 3, 1]
+    W1_row4 = tf.concat(W1_c[24:30], 0)  # [30, 5, 3, 1]
+    W1_row5 = tf.concat(W1_c[30:36], 0)  # [30, 5, 3, 1]
+
+    W1_d = tf.concat([W1_row0, W1_row1, W1_row2, W1_row3, W1_row4, W1_row5], 1)  # [30, 30, 3, 1]
+    W1_e = tf.reshape(W1_d, [1, 30, 30, 1])
+    tf.summary.image("kernel_images", W1_e, 8)
+
+
+
 # interactive session allows interleaving of building and running steps
 sess = tf.InteractiveSession()
 
@@ -103,6 +129,7 @@ vimageBatch, vlabelBatch = tf.train.shuffle_batch(
 x = tf.placeholder(tf.float32, [None, width*height])
 # similarly, we have a placeholder for true outputs (obtained from labels)
 y_ = tf.placeholder(tf.float32, [None, nClass])
+
 if simpleModel:
   # run simple model y=Wx+b given in TensorFlow "MNIST" tutorial
 
@@ -150,12 +177,14 @@ else:
   # 1 input channel
   W_conv1 = weight_variable([5, 5, 1, nFeatures1])
   b_conv1 = bias_variable([nFeatures1])
+  visualize_convolutions(W_conv1)
+  tf.summary.histogram("kernel1", W_conv1)
   
   # reshape raw image data to 4D tensor. 2nd and 3rd indexes are W,H, fourth 
   # means 1 colour channel per pixel
   # x_image = tf.reshape(x, [-1,28,28,1])
   x_image = tf.reshape(x, [-1,width,height,1])
-  # V = tf.summary.image('input', x_image, 5)
+  tf.summary.image("input", x_image, 4)
   
   # hidden layer 1 
   # pool(convolution(Wx)+b)
@@ -167,7 +196,8 @@ else:
   # input is nFeatures1 (number of features output from previous layer)
   W_conv2 = weight_variable([5, 5, nFeatures1, nFeatures2])
   b_conv2 = bias_variable([nFeatures2])
-  
+  tf.summary.histogram("kernel2", W_conv2)
+
 
   h_conv2 = tf.nn.relu(conv2d(h_pool1, W_conv2) + b_conv2)
   h_pool2 = max_pool_2x2(h_conv2)
@@ -208,6 +238,7 @@ else:
 # measure of error of our model
 # this needs to be minimised by adjusting W and b
 cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ * tf.log(y), reduction_indices=[1]))
+tf.summary.scalar("x-ent", cross_entropy)
 
 # define training step which minimises cross entropy
 train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
@@ -217,6 +248,7 @@ correct_prediction = tf.equal(tf.argmax(y,1), tf.argmax(y_,1))
 
 # get mean of all entries in correct prediction, the higher the better
 accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+tf.summary.scalar("accuracy", accuracy)
 
 # initialize the variables
 sess.run(tf.global_variables_initializer())
@@ -227,7 +259,7 @@ coord = tf.train.Coordinator()
 threads = tf.train.start_queue_runners(sess=sess,coord=coord)
 
 writer = tf.summary.FileWriter("./shape_graph", sess.graph)
-#merged = tf.summary.merge_all()
+merged_summary = tf.summary.merge_all()
 
 # start training
 nSteps = 1000
@@ -237,9 +269,10 @@ for i in range(nSteps):
 
 
     # run the training step with feed of images
-    train_step.run(feed_dict={x: batch_xs, y_: batch_ys, keep_prob: 0.5})
+    s, k = sess.run([merged_summary, train_step], feed_dict={x: batch_xs, y_: batch_ys, keep_prob: 0.5})
+    writer.add_summary(s, i)
 
-    if (i + 1) % 100 == 0:  # then perform validation
+    if (i + 1) % 10 == 0:  # then perform validation
 
         # get a validation batch
         vbatch_xs, vbatch_ys = sess.run([vimageBatch, vlabelBatch])

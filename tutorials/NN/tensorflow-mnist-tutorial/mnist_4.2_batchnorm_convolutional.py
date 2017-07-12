@@ -99,10 +99,12 @@ Y1bn, update_ema1 = batchnorm(Y1l, tst, iter, B1, convolutional=True)
 Y1r = tf.nn.relu(Y1bn)
 Y1 = tf.nn.dropout(Y1r, pkeep_conv, compatible_convolutional_noise_shape(Y1r))
 stride = 2  # output is 14x14
+
 Y2l = tf.nn.conv2d(Y1, W2, strides=[1, stride, stride, 1], padding='SAME')
 Y2bn, update_ema2 = batchnorm(Y2l, tst, iter, B2, convolutional=True)
 Y2r = tf.nn.relu(Y2bn)
 Y2 = tf.nn.dropout(Y2r, pkeep_conv, compatible_convolutional_noise_shape(Y2r))
+
 stride = 2  # output is 7x7
 Y3l = tf.nn.conv2d(Y2, W3, strides=[1, stride, stride, 1], padding='SAME')
 Y3bn, update_ema3 = batchnorm(Y3l, tst, iter, B3, convolutional=True)
