@@ -29,8 +29,14 @@ HEIGHT = 72
 NUM_CHANNELS = 3
 
 
-# Function to read a single image from input file
 def get_image(filename, name="get_image"):
+    """
+    Preprocessing function which sets up a queue for a TFRecord reader. Retrieves an image, decodes it, converts dtype
+    to float and sets the label to a one hot tensor.
+    :param filename: The location of the TFRecord file
+    :param name: The name_scope of the function call
+    :return: An image tensor and a one hot label
+    """
     with tf.name_scope(name):
         # convert filename to a queue for an input pipeline.
         filename_queue = tf.train.string_input_producer([filename], num_epochs=None)
@@ -79,14 +85,63 @@ def get_image(filename, name="get_image"):
         return label, image
 
 
+def distort_colour(image):
+    """Distort the color of the image.
+    Each color distortion is non-commutative and thus ordering of the color ops
+    matters. This effectively expands the data set to an unlimited number of examples
+    :param image: Tensor containing a single image
+    :return: Tensor containing the colour distorted image
+    """
+    ordering = np.random.random_integers(11)
+    with tf.name_scope("distort_colour"):
+        if ordering == 1:
+            pass
+        elif ordering == 2:
+            image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+            image = tf.image.random_brightness(image, max_delta=0.20)
+            image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
+            image = tf.image.random_hue(image, max_delta=0.1)
+        elif ordering == 3:
+            image = tf.image.random_brightness(image, max_delta=0.20)
+            image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
+            image = tf.image.random_hue(image, max_delta=0.1)
+            image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+        elif ordering == 4:
+            image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
+            image = tf.image.random_brightness(image, max_delta=0.20)
+            image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+        elif ordering == 5:
+            image = tf.image.random_hue(image, max_delta=0.1)
+            image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+            image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
+        elif ordering == 6:
+            image = tf.image.random_brightness(image, max_delta=0.20)
+            image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+        elif ordering == 7:
+            image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
+            image = tf.image.random_brightness(image, max_delta=0.20)
+        elif ordering == 8:
+            image = tf.image.random_brightness(image, max_delta=0.20)
+        elif ordering == 9:
+            image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
+        elif ordering == 10:
+            image = tf.image.random_saturation(image, lower=0.3, upper=1.5)
+        elif ordering == 11:
+            image = tf.image.random_hue(image, max_delta=0.1)
+    return image
+
+
+
 # "label" and "image" are associated with corresponding feature from a single example in the training data file
 # at this point label is one hot vector. If label = 1 then [1,0]... if label = 2 then [0,1]
 # (and yes that's opposite to binary!)
-label, image = get_image("../../dataset/traffic_sign/train-00000-of-00001")
-
-
-# and similarly for the validation data
-vlabel, vimage = get_image("../../dataset/traffic_sign/validation-00000-of-00001")
+# use CPU to preprocess individual images to save GPU for feed forward / backpropagation
+with tf.device('/cpu:0'):
+    label, image = get_image("../../dataset/traffic_sign/train-00000-of-00001")
+    # chance to distort the image
+    image = distort_colour(image)
+    # and similarly for the validation data
+    vlabel, vimage = get_image("../../dataset/traffic_sign/validation-00000-of-00001")
 
 
 # associate "label_batch" and "image_batch" objects with a randomly selected batch of labels and images respectively
@@ -120,54 +175,6 @@ with tf.name_scope("inputs"):
     # Probability of keeping a node during dropout = 1.0 at test time (no dropout) and 0.75 at training time
     pkeep = tf.placeholder(tf.float32, name="dropout_prob")
     tf.summary.image("input", X, 4)
-
-
-def distort_colour(image, scope):
-    """Distort the color of the image.
-    Each color distortion is non-commutative and thus ordering of the color ops
-    matters.
-    :param image: Tensor containing a single image
-    :param scope: Scope of the function call
-    :return: Tensor containing the colour distorted image
-    """
-    with tf.name_scope(scope):
-        ordering = np.random.random_integers(7)
-    if ordering == 1:
-        image = tf.image.random_brightness(image, max_delta=32. / 255.)
-        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
-        image = tf.image.random_hue(image, max_delta=0.2)
-        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
-    elif ordering == 2:
-        image = tf.image.random_brightness(image, max_delta=32. / 255.)
-        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
-        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
-        image = tf.image.random_hue(image, max_delta=0.2)
-    elif ordering == 3:
-        image = tf.image.random_brightness(image, max_delta=32. / 255.)
-        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
-        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
-        image = tf.image.random_hue(image, max_delta=0.2)
-    elif ordering == 4:
-        image = tf.image.random_brightness(image, max_delta=32. / 255.)
-        image = tf.image.random_hue(image, max_delta=0.2)
-        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
-        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
-    elif ordering == 5:
-        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
-        image = tf.image.random_hue(image, max_delta=0.2)
-        image = tf.image.random_brightness(image, max_delta=32. / 255.)
-        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
-    elif ordering == 6:
-        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
-        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
-        image = tf.image.random_brightness(image, max_delta=32. / 255.)
-        image = tf.image.random_hue(image, max_delta=0.2)
-    elif ordering == 7:
-        image = tf.image.random_hue(image, max_delta=0.2)
-        image = tf.image.random_contrast(image, lower=0.5, upper=1.5)
-        image = tf.image.random_saturation(image, lower=0.5, upper=1.5)
-        image = tf.image.random_brightness(image, max_delta=32. / 255.)
-
 
 
 # def visualize_kernel(W1):
@@ -205,82 +212,45 @@ def model():
     with tf.variable_scope("the_model"):
         # three convolutional layers with their channel counts, and a
         # fully connected layer (the last layer has 2 softmax neurons for "stop" and "go")
-        I = 128  # 1st convolutional layer output channels
         J = 128  # 2nd convolutional layer output channels
-        K = 160  # 3rd convolutional layer output channels
-        L = 256  # 4th
-        M = 384  # 5th
-        N = 2048 # fully connected layer
+        K = 172  # 3rd convolutional layer output channels
+        N = 1536 # fully connected layer
 
         # weights / kernels
         # 7x7 patch, 3 input channel, J output channels
-        W1 = tf.Variable(tf.truncated_normal([7, 7, NUM_CHANNELS, I], stddev=0.1))
-        W2 = tf.Variable(tf.truncated_normal([5, 5, I, J], stddev=0.1))
-        W3 = tf.Variable(tf.truncated_normal([3, 3, J, K], stddev=0.1))
-        W4 = tf.Variable(tf.truncated_normal([3, 3, K, L], stddev=0.1))
-        W5 = tf.Variable(tf.truncated_normal([3, 3, L, M]))
-        W6 = tf.Variable(tf.truncated_normal([5 * 5 * M, N], stddev=0.1))
-        W7 = tf.Variable(tf.truncated_normal([N, NUM_CLASSES], stddev=0.1))
+        W1 = tf.Variable(tf.truncated_normal([7, 7, NUM_CHANNELS, J], stddev=0.1))
+        W2 = tf.Variable(tf.truncated_normal([5, 5, J, K], stddev=0.1))
+        W3 = tf.Variable(tf.truncated_normal([8 * 8 * K, N], stddev=0.1))
+        W4 = tf.Variable(tf.truncated_normal([N, NUM_CLASSES], stddev=0.1))
 
      #   visualize_kernel(W1)
 
         # biases
-        B1 = tf.Variable(tf.constant(0.1, tf.float32, [I]))
-        B2 = tf.Variable(tf.constant(0.1, tf.float32, [J]))
-        B3 = tf.Variable(tf.constant(0.1, tf.float32, [K]))
-        B4 = tf.Variable(tf.constant(0.1, tf.float32, [L]))
-        B5 = tf.Variable(tf.constant(0.1, tf.float32, [M]))
-        B6 = tf.Variable(tf.constant(0.1, tf.float32, [N]))
-        B7 = tf.Variable(tf.constant(0.1, tf.float32, [NUM_CLASSES]))
+        B1 = tf.Variable(tf.constant(0.1, tf.float32, [J]))
+        B2 = tf.Variable(tf.constant(0.1, tf.float32, [K]))
+        B3 = tf.Variable(tf.constant(0.1, tf.float32, [N]))
+        B4 = tf.Variable(tf.constant(0.1, tf.float32, [NUM_CLASSES]))
 
-        # 72x72
-        X1 = tf.nn.max_pool(X, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-        tf.summary.image("MAX_POOL1", X1, 4)
-        # 36x36
-        X2 = tf.nn.max_pool(X1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-        tf.summary.image("MAX_POOL2", X2, 4)
-        #18x18
-        X3 = tf.nn.max_pool(X2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-        tf.summary.image("MAX_POOL3", X3, 4)
-        #9x9
-        X4 = tf.nn.max_pool(X3, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-        tf.summary.image("MAX_POOL4", X4, 4)
 
         with tf.name_scope("first_layer"):
             # 72x72 images
             Y1r = tf.nn.relu(tf.nn.conv2d(X, W1, strides=[1, 1, 1, 1], padding='SAME') + B1)
-            # 36x36 images after max_pool
-            Y1p = tf.nn.max_pool(Y1r, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+            # 3x3 pooling area with stride of 3 reduces the image by 2/3 = 24x24 images after max_pool
+            Y1p = tf.nn.max_pool(Y1r, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
             Y1 = tf.nn.dropout(Y1p, pkeep)
 
         with tf.name_scope("second_layer"):
             Y2r = tf.nn.relu(tf.nn.conv2d(Y1, W2, strides=[1, 1, 1, 1], padding='SAME') + B2)
-            # 18x18 images after max_pool
-            Y2p = tf.nn.max_pool(Y2r, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
+            # 3x3 pooling area with stride 3 reduces image by 2/3 = 8x8
+            Y2p = tf.nn.max_pool(Y2r, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
             Y2 = tf.nn.dropout(Y2p, pkeep)
 
-        with tf.name_scope("third_layer"):
-            Y3r = tf.nn.relu(tf.nn.conv2d(Y2, W3, strides=[1, 1, 1, 1], padding='SAME') + B3)
-            # 9x9 images after max_pool
-            Y3p = tf.nn.max_pool(Y3r, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-            Y3 = tf.nn.dropout(Y3p, pkeep)
-
-        with tf.name_scope("fourth_layer"):
-            Y4r = tf.nn.relu(tf.nn.conv2d(Y3, W4, strides=[1, 1, 1, 1], padding='SAME') + B4)
-            # 5x5 images after max_pool
-            Y4p = tf.nn.max_pool(Y4r, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-            Y4 = tf.nn.dropout(Y4p, pkeep)
-
-        with tf.name_scope("fifth_layer"):
-            Y5r = tf.nn.relu(tf.nn.conv2d(Y4, W5, strides=[1, 1, 1, 1], padding='SAME') + B5)
-            Y5 = tf.nn.dropout(Y5r, pkeep)
-
         with tf.name_scope("fc_layer"):
-            YY = tf.reshape(Y5, shape=[-1, 5 * 5 * M])
-            Y6 = tf.nn.relu(tf.matmul(YY, W6) + B6)
+            YY = tf.reshape(Y2, shape=[-1, 8 * 8 * K])
+            Y3 = tf.nn.relu(tf.matmul(YY, W3) + B3)
 
-            YY6 = tf.nn.dropout(Y6, pkeep)
-            Ylogits = tf.matmul(YY6, W7) + B7
+            YY4 = tf.nn.dropout(Y3, pkeep)
+            Ylogits = tf.matmul(YY4, W4) + B4
             Y = tf.nn.softmax(Ylogits)
 
         return Y, Ylogits
@@ -314,7 +284,7 @@ sess.run(tf.global_variables_initializer())
 coord = tf.train.Coordinator()
 threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-writer = tf.summary.FileWriter("./traffic_graph/1.1", sess.graph)
+writer = tf.summary.FileWriter("./traffic_graph/2layer", sess.graph)
 merged_summary = tf.summary.merge_all()
 
 # start training
@@ -323,12 +293,14 @@ for i in range(nSteps):
 
     batch_xs, batch_ys = sess.run([imageBatch, labelBatch])
 
+    # train_step is the backpropagation step. Running this op allows the network to learn the distribution of the data
     s, k = sess.run([merged_summary, train_step], feed_dict={X: batch_xs, Y_: batch_ys, lr: 0.0008, pkeep: 0.5})
     writer.add_summary(s, i)
 
     if (i + 1) % 100 == 0:  # then perform validation
 
-        # get a validation batch
+        # get a validation batch and calculate the accuracy of the predictions
+        # note accuracy.eval() is equivalent to sess.run(accuracy)
         vbatch_xs, vbatch_ys = sess.run([vimageBatch, vlabelBatch])
         train_accuracy = accuracy.eval(feed_dict={X: vbatch_xs, Y_: vbatch_ys, lr: 0.0008, pkeep: 1.0})
 

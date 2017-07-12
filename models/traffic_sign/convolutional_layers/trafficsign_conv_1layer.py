@@ -212,66 +212,38 @@ def model():
     with tf.variable_scope("the_model"):
         # three convolutional layers with their channel counts, and a
         # fully connected layer (the last layer has 2 softmax neurons for "stop" and "go")
-        J = 128  # 2nd convolutional layer output channels
-        K = 160  # 3rd convolutional layer output channels
-        L = 224  # 4th
-        M = 296  # 5th
+        J = 256  # 2nd convolutional layer output channels
         N = 1536 # fully connected layer
 
         # weights / kernels
         # 7x7 patch, 3 input channel, J output channels
         W1 = tf.Variable(tf.truncated_normal([7, 7, NUM_CHANNELS, J], stddev=0.1))
-        W2 = tf.Variable(tf.truncated_normal([5, 5, J, K], stddev=0.1))
-        W3 = tf.Variable(tf.truncated_normal([3, 3, K, L], stddev=0.1))
-        W4 = tf.Variable(tf.truncated_normal([3, 3, L, M], stddev=0.1))
-        W5 = tf.Variable(tf.truncated_normal([6 * 6 * M, N], stddev=0.1))
-        W6 = tf.Variable(tf.truncated_normal([N, NUM_CLASSES], stddev=0.1))
+        W2 = tf.Variable(tf.truncated_normal([8 * 8 * J, N], stddev=0.1))
+        W3 = tf.Variable(tf.truncated_normal([N, NUM_CLASSES], stddev=0.1))
 
      #   visualize_kernel(W1)
 
         # biases
         B1 = tf.Variable(tf.constant(0.1, tf.float32, [J]))
-        B2 = tf.Variable(tf.constant(0.1, tf.float32, [K]))
-        B3 = tf.Variable(tf.constant(0.1, tf.float32, [L]))
-        B4 = tf.Variable(tf.constant(0.1, tf.float32, [M]))
-        B5 = tf.Variable(tf.constant(0.1, tf.float32, [N]))
-        B6 = tf.Variable(tf.constant(0.1, tf.float32, [NUM_CLASSES]))
+        B2 = tf.Variable(tf.constant(0.1, tf.float32, [N]))
+        B3 = tf.Variable(tf.constant(0.1, tf.float32, [NUM_CLASSES]))
 
-        # # 72x72 -> 36x36
-        X1 = tf.nn.max_pool(X, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-        tf.summary.image("MAX_POOL_36x36", X1, 4)
-        X2 = tf.nn.max_pool(X, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
-        tf.summary.image("MAX_POOL_24x24", X2, 4)
 
         with tf.name_scope("first_layer"):
             # 72x72 images
-            Y1r = tf.nn.relu(tf.nn.conv2d(X, W1, strides=[1, 1, 1, 1], padding='SAME') + B1)
-            # 24x24 images after max_pool
-            Y1p = tf.nn.max_pool(Y1r, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
-            Y1 = tf.nn.dropout(Y1p, pkeep)
-
-        with tf.name_scope("second_layer"):
-            Y2r = tf.nn.relu(tf.nn.conv2d(Y1, W2, strides=[1, 1, 1, 1], padding='SAME') + B2)
-            Y2 = tf.nn.dropout(Y2r, pkeep)
-
-        with tf.name_scope("third_layer"):
-            Y3r = tf.nn.relu(tf.nn.conv2d(Y2, W3, strides=[1, 1, 1, 1], padding='SAME') + B3)
-            # 12x12
-            Y3p = tf.nn.max_pool(Y3r, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-            Y3 = tf.nn.dropout(Y3p, pkeep)
-
-        with tf.name_scope("fourth_layer"):
-            Y4r = tf.nn.relu(tf.nn.conv2d(Y3, W4, strides=[1, 1, 1, 1], padding='SAME') + B4)
-            # 6x6 after max pool
-            Y4p = tf.nn.max_pool(Y4r, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding="SAME")
-            Y4 = tf.nn.dropout(Y4p, pkeep)
+            Y1p = tf.nn.max_pool(X, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
+            tf.summary.image("First_max_pool", Y1p, 4)
+            Y1r = tf.nn.relu(tf.nn.conv2d(Y1p, W1, strides=[1, 1, 1, 1], padding='SAME') + B1)
+            # 3x3 pooling area with stride of 3 reduces the image by 2/3 = 24x24 images after max_pool
+            Y2p = tf.nn.max_pool(Y1r, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
+            Y2 = tf.nn.dropout(Y2p, pkeep)
 
         with tf.name_scope("fc_layer"):
-            YY = tf.reshape(Y4, shape=[-1, 6 * 6 * M])
-            Y6 = tf.nn.relu(tf.matmul(YY, W5) + B5)
+            YY = tf.reshape(Y2, shape=[-1, 8 * 8 * J])
+            Y3 = tf.nn.relu(tf.matmul(YY, W2) + B2)
 
-            YY6 = tf.nn.dropout(Y6, pkeep)
-            Ylogits = tf.matmul(YY6, W6) + B6
+            YY4 = tf.nn.dropout(Y3, pkeep)
+            Ylogits = tf.matmul(YY4, W3) + B3
             Y = tf.nn.softmax(Ylogits)
 
         return Y, Ylogits
@@ -305,7 +277,7 @@ sess.run(tf.global_variables_initializer())
 coord = tf.train.Coordinator()
 threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-writer = tf.summary.FileWriter("./traffic_graph/1.1", sess.graph)
+writer = tf.summary.FileWriter("./traffic_graph/1layer", sess.graph)
 merged_summary = tf.summary.merge_all()
 
 # start training
@@ -314,12 +286,14 @@ for i in range(nSteps):
 
     batch_xs, batch_ys = sess.run([imageBatch, labelBatch])
 
+    # train_step is the backpropagation step. Running this op allows the network to learn the distribution of the data
     s, k = sess.run([merged_summary, train_step], feed_dict={X: batch_xs, Y_: batch_ys, lr: 0.0008, pkeep: 0.5})
     writer.add_summary(s, i)
 
     if (i + 1) % 100 == 0:  # then perform validation
 
-        # get a validation batch
+        # get a validation batch and calculate the accuracy of the predictions
+        # note accuracy.eval() is equivalent to sess.run(accuracy)
         vbatch_xs, vbatch_ys = sess.run([vimageBatch, vlabelBatch])
         train_accuracy = accuracy.eval(feed_dict={X: vbatch_xs, Y_: vbatch_ys, lr: 0.0008, pkeep: 1.0})
 
