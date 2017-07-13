@@ -272,7 +272,7 @@ def model():
 
 Y, Ylogits = model()
 
-# cross-entropy loss function (= -sum(Y_i * log(Yi)) ), normalised for batches of 50 images
+# cross-entropy loss function (= -sum(Y_i * log(Yi)) ), normalised for batches of 64 images
 # TensorFlow provides the softmax_cross_entropy_with_logits function to avoid numerical stability
 # problems with log(0) which is NaN
 with tf.name_scope("x-ent"):

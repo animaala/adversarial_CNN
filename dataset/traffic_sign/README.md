@@ -1,9 +1,10 @@
 ## Welcome to the Traffic Sign dataset
 
-The data is split 9 to 1 between ```/train``` and ```/validation```. This is slightly higher than the 6 to 1 split of the MNIST dataset to reduce risk of imbalance. Later in the project I will be putting some data augmentation techniques in the model to expand the number of examples.
+The data is split 4 to 1 between ```/train``` and ```/validation```. This is slightly lower than the 6 to 1 split of the MNIST dataset. However data augmentation is used in the model to expand the training and test sets.
 
+### To create a dataset for Tensorflow to use:
 
-I set up some directories to contain training and validation data, for each of our two classes (go , stop)
+1. Set up some directories to contain training and validation data, for each of our two classes (go , stop)
 
 ```
 mkdir -p traffic_sign/train/go
@@ -12,19 +13,14 @@ mkdir -p traffic_sign/validation/go
 mkdir -p traffic_sign/validation/stop
 ```
 
-### To convert images to a TensorFlow format:
-
-In the ```/traffic_sign``` directory:
-
-### Create a file called mylabels.txt and write to it the names of our classes:
+2. In the ```/dataset/traffic_sign/``` directory create a file called mylabels.txt and write to it the names of our classes:
 
 ```
 go
 stop
 ```
 
-To convert our images to TensorFlow TFRecord format, we are going to just use the build_image_data.py 
-script that is bundled with the Inception TensorFlow model.
+3. To convert our images to TensorFlow TFRecord format, use the ```build_image_data.py``` script located in the ```/dataset/traffic_sign/``` directory. This script is bundled with the *Inception* TensorFlow model so is official Google.
 
 We can just use this a “black box” to convert our data (but we get some insight as to what it is doing later 
 when we read the data within TensorFlow). Run the following command
