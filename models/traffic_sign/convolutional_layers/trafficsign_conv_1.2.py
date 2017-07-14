@@ -325,6 +325,13 @@ for i in range(nSteps):
 
         print("step %d, test accuracy %g" % (i + 1, test_acc))
 
+print("{} steps have been completed. Beginning construction of adversarial example.".format(nSteps))
+
+
+
+
+
+
 
 # finalise
 writer.close()
