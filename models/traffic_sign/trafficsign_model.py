@@ -3,7 +3,9 @@
 # A Convolutional Neural Network binary classifier implementation designed
 # to work with a custom road traffic sign data set.
 #
-# **This module handles the representation of the network**
+# **This module handles the representation of the network, provides functions
+#   to bring in preprocessed images and labels, compute loss and accuracy and
+#   some summary functions**
 #
 # Implemented in Python 3.5, TF v1.1, CuDNN 5.1
 #
@@ -16,28 +18,45 @@
 ########################################################################
 
 import tensorflow as tf
-import numpy as np
 import trafficsign_input as input
+import os
 
 ########################################################################
 
 # Various constants for describing the data set
 
-# location of the data set: a TFRecord file
-DATA_PATH = input.DATA_PATH
-
-# number of classes is 2 (go and stop)
-NUM_CLASSES = input.NUM_CLASSES
-
 # Width and height of each image. (pixels)
 WIDTH = input.WIDTH
 HEIGHT = input.HEIGHT
+
+# number of classes is 2 (go and stop)
+NUM_CLASSES = input.NUM_CLASSES
 
 # Number of channels in each image, 3 channels: Red, Green, Blue.
 NUM_CHANNELS = input.NUM_CHANNELS
 
 # batch size for training/validating network
 BATCH_SIZE = input.BATCH_SIZE
+
+# location of the data set: a TFRecord file
+DATA_PATH = input.DATA_PATH
+
+# location of the .jpg we want to craft an adversarial example from
+ADVERSARIAL_PATH = input.ADVERSARIAL_PATH
+
+
+def _visualize_kernel(W):
+    with tf.variable_scope('kernel_visualisation'):
+        # scale weights to [0 1], type is still float
+        x_min = tf.reduce_min(W)
+        x_max = tf.reduce_max(W)
+        W_0_to_1 = (W - x_min) / (x_max - x_min)
+
+        # to tf.image_summary format [batch_size, height, width, channels]
+        kernel_transposed = tf.transpose(W_0_to_1, [3, 0, 1, 2])
+
+        # this will display random 3 filters from the 128 in conv1
+        tf.summary.image('conv1', kernel_transposed, 3)
 
 
 def _activation_summary(x):
@@ -48,6 +67,35 @@ def _activation_summary(x):
     """
     tf.summary.histogram('activations', x)
     tf.summary.scalar('sparsity', tf.nn.zero_fraction(x))
+
+
+def distorted_inputs(path):
+    """Construct distorted input batch for Traffic sign evaluation
+    :param validation: bool, indicating if train or validation data should be used
+    :returns:
+        image_batch: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+        label_batch: Labels. 2D tensor of [batch_size, NUM_CLASSES]
+    """
+    if not os.path.isfile(path):
+        raise ValueError("trafficsign_model.distorted_inputs(path): path is not a file")
+    image, label = input.get_image(path)
+    image = input.distort_colour(image)
+    image_batch, label_batch = input.create_batch(image, label)
+    return image_batch, label_batch
+
+
+def inputs(path):
+    """Construct input batch for Traffic sign evaluation
+    :param validation: bool, indicating if train or validation data should be used
+    :returns:
+        image_batch: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+        label_batch: Labels. 2D tensor of [batch_size, NUM_CLASSES]
+    """
+    if not os.path.isfile(path):
+        raise ValueError("trafficsign_model.inputs(path): path is not a file")
+    image, label = input.get_image(path)
+    image_batch, label_batch = input.create_batch(image, label)
+    return image_batch, label_batch
 
 
 def inference(images, pkeep):
@@ -79,7 +127,7 @@ def inference(images, pkeep):
         B3 = tf.Variable(tf.constant(0.1, tf.float32, [N]))
         B4 = tf.Variable(tf.constant(0.1, tf.float32, [NUM_CLASSES]))
 
-        #visualize_kernel(W1)
+        _visualize_kernel(W1)
 
         with tf.name_scope("first_layer"):
             # 72x72 images
@@ -134,3 +182,19 @@ def accuracy(logits, Y_):
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
         tf.summary.scalar("accuracy", accuracy)
     return accuracy
+
+
+def train(loss, lr):
+    """Returns an operation that applies the gradients from ADAM
+    :param logits: Unscaled logits from model
+    :param lr: Learning rate
+    :return: Op which applies gradients
+    """
+    opt = tf.train.AdamOptimizer(lr)
+    grads = opt.compute_gradients(loss)
+    train_step = opt.apply_gradients(grads)
+    # Add histograms for gradients.
+    for grad, var in grads:
+        if grad is not None:
+            tf.summary.histogram(var.op.name + '/gradients', grad)
+    return train_step

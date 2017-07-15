@@ -3,7 +3,7 @@
 # A Convolutional Neural Network binary classifier implementation designed
 # to work with a custom road traffic sign data set.
 #
-#  **This module handles data inputs, batching and augmentation**
+# **This module handles data inputs, batching and augmentation**
 #
 # Implemented in Python 3.5, TF v1.1, CuDNN 5.1
 #
@@ -17,6 +17,7 @@
 
 import tensorflow as tf
 import numpy as np
+import os
 
 ########################################################################
 
@@ -50,6 +51,8 @@ def get_image(path_to_file, adversarial=False, name="get_image"):
     :param name: The name_scope of the function call
     :return: An image tensor and a one hot label
     """
+    if not os.path.isfile(path_to_file):
+        raise ValueError("path_to_file is not a file")
     with tf.name_scope(name):
         if adversarial:
             # hard coding the label for now, we're creating adversarial examples for the stop class, i.e class 2
