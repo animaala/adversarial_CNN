@@ -22,19 +22,18 @@ import trafficsign_model as model
 
 # Various constants for describing the data set
 
-# image dimensions
-HEIGHT = model.HEIGHT
-WIDTH = model.WIDTH
-# 3 for RGB
-NUM_CHANNELS = model.NUM_CHANNELS
-# 2 (go, stop)
-NUM_CLASSES = model.NUM_CLASSES
-
 # location of the data set: a TFRecord file
 DATA_PATH = model.DATA_PATH
 
-# location of the .jpg we want to craft an adversarial example from
-ADVERSARIAL_PATH = model.ADVERSARIAL_PATH
+# Width and height of each image. (pixels)
+HEIGHT = model.HEIGHT
+WIDTH = model.WIDTH
+
+# number of classes is 2 (go and stop)
+NUM_CLASSES = model.NUM_CLASSES
+
+# Number of channels in each image, 3 channels: Red, Green, Blue.
+NUM_CHANNELS = model.NUM_CHANNELS
 
 
 # Placeholders for data we will populate later
@@ -47,31 +46,39 @@ with tf.name_scope("inputs"):
     lr = tf.placeholder(tf.float32, name="learning_rate")
     # Probability of keeping a node during dropout = 1.0 at test time (no dropout) and 0.5 at training time
     pkeep = tf.placeholder(tf.float32, name="dropout_prob")
+    # placeholder for the adversarial target class, which will be 1, i.e. "go"
+    pl_cls_target = tf.placeholder(dtype=tf.int32)
     tf.summary.image("image", X, 3)
 
-with tf.name_scope("get_batch"):
+with tf.name_scope("normal_model"):
+    # get batches of images for training network
+    with tf.name_scope("get_batch"):
+        with tf.device('/cpu:0'):
+            imageBatch, labelBatch = model.distorted_inputs(DATA_PATH + "train-00000-of-00001")
+            vimageBatch, vlabelBatch = model.distorted_inputs(DATA_PATH + "validation-00000-of-00001")
+
+
+
+    # Build a Graph that computes the logits predictions from the inference model.
+    logits = model.inference(X, pkeep)
+
+    # compute cross entropy loss on the logits
+    loss = model.loss(logits, Y_)
+
+    # get accuracy of logits with the ground truth
+    accuracy = model.accuracy(logits, Y_)
+
+    # Build a Graph that trains the model with one batch of examples and updates the model parameters.
+    train_step = model.train(loss, lr)
+
+
+# adversarial part of the graph
+with tf.name_scope("adversarial"):
+
     with tf.device('/cpu:0'):
-        imageBatch, labelBatch = model.distorted_inputs(DATA_PATH + "train-00000-of-00001")
-        vimageBatch, vlabelBatch = model.distorted_inputs(DATA_PATH + "validation-00000-of-00001")
+        image, label = model.adversarial_input()
 
-
-# Build a Graph that computes the logits predictions from the
-# inference model.
-logits = model.inference(X, pkeep)
-
-# compute cross entropy loss
-loss = model.loss(logits, Y_)
-
-# get accuracy
-accuracy = model.accuracy(logits, Y_)
-
-# Build a Graph that trains the model with one batch of examples and
-# updates the model parameters.
-train_step = model.train(loss, lr)
-
-
-
-
+    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=y_logits, labels=[pl_cls_target])
 
 
 

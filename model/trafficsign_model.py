@@ -19,11 +19,15 @@
 
 import tensorflow as tf
 import trafficsign_input as input
+import random
 import os
 
 ########################################################################
 
 # Various constants for describing the data set
+
+# location of the data set: a TFRecord file
+DATA_PATH = input.DATA_PATH
 
 # Width and height of each image. (pixels)
 WIDTH = input.WIDTH
@@ -38,11 +42,6 @@ NUM_CHANNELS = input.NUM_CHANNELS
 # batch size for training/validating network
 BATCH_SIZE = input.BATCH_SIZE
 
-# location of the data set: a TFRecord file
-DATA_PATH = input.DATA_PATH
-
-# location of the .jpg we want to craft an adversarial example from
-ADVERSARIAL_PATH = input.ADVERSARIAL_PATH
 
 
 def _visualize_kernel(W):
@@ -59,6 +58,7 @@ def _visualize_kernel(W):
         tf.summary.image('conv1', kernel_transposed, 3)
 
 
+
 def _activation_summary(x):
     """Helper to create activation summaries. Creates a summary that provides a histogram
     of activations. Creates a summary that measures the sparsity of activations.
@@ -69,33 +69,50 @@ def _activation_summary(x):
     tf.summary.scalar('sparsity', tf.nn.zero_fraction(x))
 
 
+
 def distorted_inputs(path):
     """Construct distorted input batch for Traffic sign evaluation
-    :param validation: bool, indicating if train or validation data should be used
+
+    :param path: path to file
     :returns:
         image_batch: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
         label_batch: Labels. 2D tensor of [batch_size, NUM_CLASSES]
     """
     if not os.path.isfile(path):
-        raise ValueError("trafficsign_model.distorted_inputs(path): path is not a file")
+        raise ValueError("File does not exist")
     image, label = input.get_image(path)
     image = input.distort_colour(image)
     image_batch, label_batch = input.create_batch(image, label)
     return image_batch, label_batch
 
 
+
 def inputs(path):
     """Construct input batch for Traffic sign evaluation
-    :param validation: bool, indicating if train or validation data should be used
+    :param path: path to file
     :returns:
         image_batch: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
         label_batch: Labels. 2D tensor of [batch_size, NUM_CLASSES]
     """
     if not os.path.isfile(path):
-        raise ValueError("trafficsign_model.inputs(path): path is not a file")
+        raise ValueError("File does not exist")
     image, label = input.get_image(path)
     image_batch, label_batch = input.create_batch(image, label)
     return image_batch, label_batch
+
+
+
+def adversarial_input():
+    """Get an image as the base for our adversarial example
+    :param path: path to file
+    :returns:
+        image_batch: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+        label_batch: Labels. 2D tensor of [batch_size, NUM_CLASSES]
+    """
+    file_name = random.choice(os.listdir(DATA_PATH + "train/stop/"))
+    image, label = input.get_image(DATA_PATH + "train/stop/" + file_name, adversarial=True)
+    return image, label
+
 
 
 def inference(images, pkeep):
@@ -156,6 +173,7 @@ def inference(images, pkeep):
         return Ylogits
 
 
+
 def loss(logits, Y_):
     """Computes cross entropy loss on the unscaled logits from model.
     Add summary for cross entropy.
@@ -168,6 +186,7 @@ def loss(logits, Y_):
         cross_entropy = tf.reduce_mean(cross_entropy) * BATCH_SIZE
         tf.summary.scalar("x-ent", cross_entropy)
     return cross_entropy
+
 
 
 def accuracy(logits, Y_):
@@ -184,9 +203,10 @@ def accuracy(logits, Y_):
     return accuracy
 
 
+
 def train(loss, lr):
     """Returns an operation that applies the gradients from ADAM
-    :param logits: Unscaled logits from model
+    :param loss: cross entropy loss
     :param lr: Learning rate
     :return: Op which applies gradients
     """

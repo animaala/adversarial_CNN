@@ -24,17 +24,14 @@ import os
 # Various constants for describing the data set
 
 # location of the data set: a TFRecord file
-DATA_PATH = "../../dataset/traffic_sign/"
-
-# location of the .jpg we want to craft an adversarial example from
-ADVERSARIAL_PATH = "./adversarial_image/stop_normal.jpg"
-
-# number of classes is 2 (go and stop)
-NUM_CLASSES = 2
+DATA_PATH = "../dataset/traffic_sign/"
 
 # Width and height of each image. (pixels)
 WIDTH = 72
 HEIGHT = 72
+
+# number of classes is 2 (go and stop)
+NUM_CLASSES = 2
 
 # Number of channels in each image, 3 channels: Red, Green, Blue.
 NUM_CHANNELS = 3
@@ -60,7 +57,7 @@ def get_image(path_to_file, adversarial=False, name="get_image"):
 
             # The match_filenames_once() function saves the list of files matching pattern "filename".
             # e.g "./images/*.jpg" to retrieve all .jpg images in the directory.
-            filename_queue = tf.train.string_input_producer(tf.train.match_filenames_once(path_to_file), num_epochs=None)
+            filename_queue = tf.train.string_input_producer(tf.train.match_filenames_once(path_to_file))
             # Read a whole JPEG file
             reader = tf.WholeFileReader()
             # Read a whole file from the queue, the first returned value in the tuple is the
