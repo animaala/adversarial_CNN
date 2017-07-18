@@ -18,9 +18,7 @@
 ########################################################################
 
 import tensorflow as tf
-import trafficsign_input as input
-import random
-import os
+import trafficsign_image_processing as input
 
 ########################################################################
 
@@ -44,74 +42,49 @@ BATCH_SIZE = input.BATCH_SIZE
 
 
 
-def _visualize_kernel(W):
-    with tf.variable_scope('kernel_visualisation'):
-        # scale weights to [0 1], type is still float
-        x_min = tf.reduce_min(W)
-        x_max = tf.reduce_max(W)
-        W_0_to_1 = (W - x_min) / (x_max - x_min)
-
-        # to tf.image_summary format [batch_size, height, width, channels]
-        kernel_transposed = tf.transpose(W_0_to_1, [3, 0, 1, 2])
-
-        # this will display random 3 filters from the 128 in conv1
-        tf.summary.image('conv1', kernel_transposed, 3)
-
-
-
-def _activation_summary(x):
-    """Helper to create activation summaries. Creates a summary that provides a histogram
-    of activations. Creates a summary that measures the sparsity of activations.
-    :param x: Tensor
-    :return: Nothing
+def loss(logits, Y_):
+    """Computes cross entropy loss on the unscaled logits from model
+    normalised for batches of BATCH_SIZE images.
+    Add summary for cross entropy.
+    :param logits: Logits from inference().
+    :param Y_: one-hot label tensor
+    :return: Loss tensor of type float
     """
-    tf.summary.histogram('activations', x)
-    tf.summary.scalar('sparsity', tf.nn.zero_fraction(x))
+    cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y_)
+    cross_entropy = tf.reduce_mean(cross_entropy, name="cross_entropy") * BATCH_SIZE
+    tf.summary.scalar("x-ent", cross_entropy)
+    return cross_entropy
 
 
 
-def distorted_inputs(path):
-    """Construct distorted input batch for Traffic sign evaluation
-
-    :param path: path to file
-    :returns:
-        image_batch: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
-        label_batch: Labels. 2D tensor of [batch_size, NUM_CLASSES]
+def accuracy(logits, Y_):
+    """Computes the accuracy of predictions.
+    :param logits: Logits from inference().
+    :param Y_: one-hot label tensor
+    :return:
     """
-    if not os.path.isfile(path):
-        raise ValueError("File does not exist")
-    image, label = input.get_image(path)
-    image = input.distort_colour(image)
-    image_batch, label_batch = input.create_batch(image, label)
-    return image_batch, label_batch
+    Y = tf.nn.softmax(logits)
+    correct_prediction = tf.equal(tf.argmax(Y, 1), tf.argmax(Y_, 1))
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+    tf.summary.scalar("accuracy", accuracy)
+    return accuracy
 
 
 
-def inputs(path):
-    """Construct input batch for Traffic sign evaluation
-    :param path: path to file
-    :returns:
-        image_batch: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
-        label_batch: Labels. 2D tensor of [batch_size, NUM_CLASSES]
+def optimize(loss, lr):
+    """Returns an operation that applies the gradients from ADAM
+    :param loss: cross entropy loss
+    :param lr: Learning rate
+    :return: Op which applies gradients
     """
-    if not os.path.isfile(path):
-        raise ValueError("File does not exist")
-    image, label = input.get_image(path)
-    image_batch, label_batch = input.create_batch(image, label)
-    return image_batch, label_batch
-
-
-
-def adversarial_input():
-    """Get an image as the base for our adversarial example
-    :param path: path to file
-    :returns:
-        image_batch: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
-        label_batch: Labels. 2D tensor of [batch_size, NUM_CLASSES]
-    """
-    file_name = random.choice(os.listdir(DATA_PATH + "train/stop/"))
-    image, label = input.get_image(DATA_PATH + "train/stop/" + file_name, adversarial=True)
-    return image, label
+    opt = tf.train.AdamOptimizer(lr)
+    grads = opt.compute_gradients(loss)
+    train_step = opt.apply_gradients(grads)
+    # Add histograms for gradients.
+    for grad, var in grads:
+        if grad is not None:
+            tf.summary.histogram(var.op.name + '/gradients', grad)
+    return train_step
 
 
 
@@ -124,7 +97,7 @@ def inference(images, pkeep):
     :param pkeep: Dropout probability
     :return: logits
     """
-    with tf.variable_scope("the_model"):
+    with tf.name_scope("the_model"):
         # 2 convolutional layers with their channel counts, and a
         # fully connected layer (the last layer has 2 softmax neurons for "stop" and "go")
         J = 128   # 1st convolutional layer output channels
@@ -146,75 +119,66 @@ def inference(images, pkeep):
 
         _visualize_kernel(W1)
 
-        with tf.name_scope("first_layer"):
-            # 72x72 images
-            Y1r = tf.nn.relu(tf.nn.conv2d(images, W1, strides=[1, 1, 1, 1], padding='SAME') + B1)
-            # 3x3 pooling area with stride of 3 reduces the image by 2/3 = 24x24 images after max_pool
-            Y1p = tf.nn.max_pool(Y1r, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
-            Y1 = tf.nn.dropout(Y1p, pkeep)
-            _activation_summary(Y1)
+        # First conv layer, 72x72 images
+        Y1 = _conv_layer(images, W1, B1, pkeep)
+        _activation_summary(Y1)
 
-        with tf.name_scope("second_layer"):
-            Y2r = tf.nn.relu(tf.nn.conv2d(Y1, W2, strides=[1, 1, 1, 1], padding='SAME') + B2)
-            # 3x3 pooling area with stride 3 reduces image by 2/3 = 8x8
-            Y2p = tf.nn.max_pool(Y2r, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
-            Y2 = tf.nn.dropout(Y2p, pkeep)
-            _activation_summary(Y2)
+        # Second conv layer, 24x24 images
+        Y2 = _conv_layer(Y1, W2, B2, pkeep)
+        _activation_summary(Y2)
 
-        with tf.name_scope("fc_layer"):
-            YY = tf.reshape(Y2, shape=[-1, 8 * 8 * K])
-            Y3 = tf.nn.relu(tf.matmul(YY, W3) + B3)
-            _activation_summary(Y3)
+        # First FC layer, 8x8 images
+        YY = tf.reshape(Y2, shape=[-1, 8 * 8 * K])
+        Y3 = tf.nn.relu(tf.matmul(YY, W3) + B3)
+        _activation_summary(Y3)
 
-            YY4 = tf.nn.dropout(Y3, pkeep)
-            Ylogits = tf.matmul(YY4, W4) + B4
-            _activation_summary(Ylogits)
-        # note we dont return softmax here.. only the unscaled logits.
+        # Softmax layer, although we don't return softmax, return logits which can be softmax'd if needed
+        YY4 = tf.nn.dropout(Y3, pkeep)
+        Ylogits = tf.matmul(YY4, W4) + B4
+        _activation_summary(Ylogits)
         return Ylogits
 
 
+########################################################################
+# Below we have private helper functions which shouldn't be used outside of this module
 
-def loss(logits, Y_):
-    """Computes cross entropy loss on the unscaled logits from model.
-    Add summary for cross entropy.
-    :param logits: Logits from inference().
-    :param Y_: one-hot label tensor
-    :return: Loss tensor of type float
+
+def _conv_layer(input, kernel, bias, pkeep):
+    """Creates one layer of convolution within the model.
+    :param input: 4-D Tensor: The images or output of previous layer.
+    :param kernel: 4-D Tensor: The weights to convolute with the input
+    :param bias: 1-D Tensor: A small bias to add to the convolution
+    :param pkeep: Float: Probability to drop a neuron
+    :return: The result of the convolution, pooling and dropout. Normalised with ReLU
     """
-    with tf.name_scope("x-ent"):
-        cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y_)
-        cross_entropy = tf.reduce_mean(cross_entropy) * BATCH_SIZE
-        tf.summary.scalar("x-ent", cross_entropy)
-    return cross_entropy
+    conv = tf.nn.relu(tf.nn.conv2d(input, kernel, strides=[1, 1, 1, 1], padding='SAME') + bias)
+    # 3x3 pooling area with stride of 3 reduces the image by 2/3 = 24x24 images after max_pool
+    pool = tf.nn.max_pool(conv, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
+    return tf.nn.dropout(pool, pkeep)
 
 
-
-def accuracy(logits, Y_):
-    """Computes the accuracy of predictions.
-    :param logits: Logits from inference().
-    :param Y_: one-hot label tensor
-    :return:
+def _visualize_kernel(W):
+    """Creates visualised kernels within Tensorboard
+    :param W: 4-D Tensor to visualize
+    :return: Nothing
     """
-    with tf.name_scope("accuracy"):
-        Y = tf.nn.softmax(logits)
-        correct_prediction = tf.equal(tf.argmax(Y, 1), tf.argmax(Y_, 1))
-        accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-        tf.summary.scalar("accuracy", accuracy)
-    return accuracy
+    # scale weights to [0 1], type is still float
+    x_min = tf.reduce_min(W)
+    x_max = tf.reduce_max(W)
+    W_0_to_1 = (W - x_min) / (x_max - x_min)
+
+    # to tf.image_summary format [batch_size, height, width, channels]
+    kernel_transposed = tf.transpose(W_0_to_1, [3, 0, 1, 2])
+
+    # this will display random 3 filters from the 128 in conv1
+    tf.summary.image('conv1', kernel_transposed, 3)
 
 
-
-def train(loss, lr):
-    """Returns an operation that applies the gradients from ADAM
-    :param loss: cross entropy loss
-    :param lr: Learning rate
-    :return: Op which applies gradients
+def _activation_summary(x):
+    """Helper to create activation summaries. Creates a summary that provides a histogram
+    of activations. Creates a summary that measures the sparsity of activations.
+    :param x: Tensor
+    :return: Nothing
     """
-    opt = tf.train.AdamOptimizer(lr)
-    grads = opt.compute_gradients(loss)
-    train_step = opt.apply_gradients(grads)
-    # Add histograms for gradients.
-    for grad, var in grads:
-        if grad is not None:
-            tf.summary.histogram(var.op.name + '/gradients', grad)
-    return train_step
+    tf.summary.histogram('activations', x)
+    tf.summary.scalar('sparsity', tf.nn.zero_fraction(x))
