@@ -3,9 +3,7 @@
 # A Convolutional Neural Network binary classifier implementation designed
 # to work with a custom road traffic sign data set.
 #
-# **This module handles the representation of the network, provides functions
-#   to bring in preprocessed images and labels, compute loss and accuracy and
-#   some summary functions**
+# **Representation, create, train and optimize a network. Summary functions**
 #
 # Implemented in Python 3.5, TF v1.1, CuDNN 5.1
 #
@@ -39,6 +37,31 @@ NUM_CHANNELS = input.NUM_CHANNELS
 
 # batch size for training/validating network
 BATCH_SIZE = input.BATCH_SIZE
+
+
+########################################################################
+
+
+def train(X, Y_, pkeep, lr):
+    """Performs one training step with a batch of images and labels. Returns ops
+    train_step and accuracy.
+    :param X: 4-D tensor. Batch of images of shape [BATCH_SIZE, 72, 72, 3]
+    :param Y_: 2-D tensor. Batch of labels of shape [BATCH_SIZE, 2]
+    :param pkeep: Float. Probability of dropout. i.e. 0.5
+    :param lr: Float. Learning rate. i.e. 0.0008
+    :returns:
+        train_step: op to run the training step
+        accuracy: op to calculate the accuracy
+    """
+    # Build a Graph that computes the logits predictions from the inference model.
+    logits = inference(X, pkeep)
+    # compute cross entropy loss on the logits
+    l = loss(logits, Y_)
+    # get accuracy of logits with the ground truth
+    acc = accuracy(logits, Y_)
+    # Build a Graph that trains the model with one batch of examples and updates the model parameters.
+    train_step = optimize(l, lr)
+    return train_step, acc
 
 
 

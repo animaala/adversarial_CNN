@@ -94,23 +94,16 @@ def parse_tfrecord_file(path_to_file):
     return features['image/encoded'], label, features['image/class/text']
 
 
-def parse_single_image(path_to_file):
-    """Parses a single JPEG image located at path_to_file
-    :param path_to_file: Directory location of image
-    :return: The encoded image_buffer
+def parse_single_image():
+    """Parses a single JPEG image located in the train/stop/ directory.
+    This is hardcoded in.
+    Returns:
+        String literal
     """
-    # hard coding the label for now, we're creating adversarial examples for the stop class, i.e class 2
+    file_name = random.choice(os.listdir(DATA_PATH+"train/stop/"))
+    image_data = tf.gfile.FastGFile(DATA_PATH+"train/stop/"+file_name, 'rb').read()
     label = 2
-    label = tf.stack(tf.one_hot(label-1, NUM_CLASSES), name="one_hot")
-    # The match_filenames_once() function saves the list of files matching the pattern in path_to_file.
-    # e.g "~/images/*.jpg" to retrieve all .jpg images in the directory.
-    filename_queue = tf.train.string_input_producer(tf.train.match_filenames_once(path_to_file))
-    # Read a whole JPEG file
-    reader = tf.WholeFileReader()
-    # Read a whole file from the queue, the first returned value in the tuple is the
-    # filename which we are ignoring.
-    _, image_buffer = reader.read(filename_queue)
-    return image_buffer, label
+    return image_data, label
 
 
 def decode_jpeg(image_buffer, scope=None):
@@ -129,11 +122,23 @@ def decode_jpeg(image_buffer, scope=None):
         # and width of image is unknown at compile-time.
         image = tf.image.decode_jpeg(image_buffer, channels=3)
         # After this point, all image pixels reside in (0,1)
-        image = tf.image.convert_image_dtype(image, dtype=tf.float32)
         image.set_shape([HEIGHT, WIDTH, NUM_CHANNELS])
         return image
 
 
+def convert_image_to_float(image, scope=None):
+    """
+    Args:
+      image: 3-D integer tensor [height, width, channels]
+      scope: scope of the function
+    Returns:
+      The image tensor with values between (0,1)
+    """
+    with tf.name_scope(values=[image], name=scope,
+                       default_name='convert_jpeg_to_float'):
+        # After this point, all image pixels reside in (0,1)
+        image = tf.image.convert_image_dtype(image, dtype=tf.float32)
+        return image
 
 def distort_colour(image):
     """Distort the colour of the image. Each colour distortion is non-commutative and thus ordering of the
@@ -192,6 +197,7 @@ def image_batch(path_to_file):
         raise ValueError("File does not exist")
     image_buffer, label, text = parse_tfrecord_file(path_to_file)
     image = decode_jpeg(image_buffer)
+    image = convert_image_to_float(image)
     image_batch, label_batch = create_batch(image, label)
     return image_batch, label_batch
 
@@ -208,6 +214,7 @@ def distorted_image_batch(path_to_file):
         raise ValueError("File does not exist")
     image_buffer, label, text = parse_tfrecord_file(path_to_file)
     image = decode_jpeg(image_buffer)
+    image = convert_image_to_float(image)
     image = distort_colour(image)
     image_batch, label_batch = create_batch(image, label)
     return image_batch, label_batch
@@ -220,8 +227,7 @@ def random_stop_image():
         image: 3-D Tensor: A random image from the Stop class
         label: The accompanying label
     """
-    file_name = random.choice(os.listdir(DATA_PATH + "train/stop/"))
-    image_buffer, label = parse_single_image(DATA_PATH + "train/stop/" + file_name)
+    image_buffer, label = parse_single_image()
     image = decode_jpeg(image_buffer)
     return image, label
 

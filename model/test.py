@@ -18,8 +18,6 @@
 import tensorflow as tf
 import trafficsign_model as model
 import trafficsign_image_processing as input
-import os
-import random
 
 ########################################################################
 
@@ -49,9 +47,6 @@ lr = tf.placeholder(tf.float32, name="learning_rate")
 pkeep = tf.placeholder(tf.float32, name="dropout_prob")
 
 
-with tf.device('/cpu:0'):
-    imageBatch, labelBatch = input.distorted_image_batch(DATA_PATH+"train-00000-of-00001")
-
 
 # Build a Graph that computes the logits predictions from the inference model.
 logits = model.inference(X, pkeep)
@@ -64,15 +59,15 @@ accuracy = model.accuracy(logits, Y_)
 train_step = model.optimize(loss, lr)
 
 
-# image_buffer, label = input.parse_single_image(DATA_PATH + "train/stop/" + file_name)
-# image = input.decode_jpeg(image_buffer)
+# # we have a second loss function to find the gradient towards the adversarial example
+cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y_)
+cross_entropy = tf.reduce_mean(cross_entropy, name="cross_entropy")
+adv_train_step = tf.train.AdamOptimizer(lr).minimize(cross_entropy)
 
-file_name = random.choice(os.listdir(DATA_PATH + "train/stop/"))
-image_data = tf.gfile.FastGFile(DATA_PATH + "train/stop/" + file_name, 'rb').read()
 
-image = input.decode_jpeg(image_data)
+with tf.device('/cpu:0'):
+    imageBatch, labelBatch = input.distorted_image_batch(DATA_PATH+"train-00000-of-00001")
 
-image = tf.expand_dims(image, 0)
 
 sess = tf.InteractiveSession()
 sess.run(tf.global_variables_initializer())
@@ -80,10 +75,36 @@ coord = tf.train.Coordinator()
 threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
 
-batch_xs = sess.run(image)
-predictions = sess.run(Y, {X: batch_xs, pkeep:1.0})
-print(predictions)
+# start training
+nSteps = 50
+for i in range(nSteps):
 
+    batch_xs, batch_ys = sess.run([imageBatch, labelBatch])
+
+    # train_step is the backpropagation step. Running this op allows the network to learn the distribution of the data
+    train_step.run(feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
+
+    if (i+1)%50 == 0:  # work out training accuracy and log summary info for tensorboard
+        train_acc = sess.run(accuracy, feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
+        print("step {}, training accuracy {}".format(i+1, train_acc))
+
+
+
+image_data, l = input.parse_single_image()
+image = input.decode_jpeg(image_data)
+image = tf.expand_dims(image, 0)
+batch_xs = sess.run(image)
+preds = Y.eval(feed_dict={X: batch_xs, pkeep:1.0})
+print(preds)
+
+
+label = tf.stack(tf.one_hot(1-1, NUM_CLASSES))
+label = tf.reshape(label, [1, 2])
+label = label.eval()
+print(label)
+
+# loss = .eval(feed_dict={X: batch_xs, pkeep:1.0, Y_: label})
+print(loss)
 
 # finalise
 coord.request_stop()
