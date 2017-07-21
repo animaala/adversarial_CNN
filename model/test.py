@@ -18,6 +18,7 @@
 import tensorflow as tf
 import trafficsign_model as model
 import trafficsign_image_processing as input
+import numpy as np
 
 ########################################################################
 
@@ -59,10 +60,8 @@ accuracy = model.accuracy(logits, Y_)
 train_step = model.optimize(loss, lr)
 
 
-# # we have a second loss function to find the gradient towards the adversarial example
-cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y_)
-cross_entropy = tf.reduce_mean(cross_entropy, name="cross_entropy")
-adv_train_step = tf.train.AdamOptimizer(lr).minimize(cross_entropy)
+adv_loss = model.loss(logits, Y_, mean=False)
+gradient = tf.gradients(adv_loss, X)
 
 
 with tf.device('/cpu:0'):
@@ -93,18 +92,19 @@ for i in range(nSteps):
 image_data, l = input.parse_single_image()
 image = input.decode_jpeg(image_data)
 image = tf.expand_dims(image, 0)
-batch_xs = sess.run(image)
-preds = Y.eval(feed_dict={X: batch_xs, pkeep:1.0})
-print(preds)
+image = sess.run(image)
+preds = Y.eval(feed_dict={X: image, pkeep:1.0})
+print("Prediction: {}".format(preds))
 
-
-label = tf.stack(tf.one_hot(1-1, NUM_CLASSES))
+label = tf.stack(tf.one_hot(0, NUM_CLASSES))
 label = tf.reshape(label, [1, 2])
-label = label.eval()
-print(label)
+tgt_label = label.eval()
 
-# loss = .eval(feed_dict={X: batch_xs, pkeep:1.0, Y_: label})
+
+loss = adv_loss.eval({X: image, Y_: tgt_label, pkeep:1.0})
 print(loss)
+
+
 
 # finalise
 coord.request_stop()

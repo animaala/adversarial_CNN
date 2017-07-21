@@ -60,7 +60,7 @@ with tf.name_scope("inputs"):
 ########################################################################
 
 
-def find_adversary_noise(decoded_img, cls_target=1, noise_limit=3.0, required_score=0.99, max_iterations=100):
+def find_adversary_noise(decoded_img, cls_target=1, noise_limit=4.0, required_score=0.95, max_iterations=100):
     """Find the noise that must be added to the given
     image so that it is classified as the target-class.
     :param image: Input image which will be altered into adversarial example. Must have dtype=int32
@@ -79,8 +79,7 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=3.0, required_sc
     tgt_label = label.eval()
 
     # input image is [h,w,channels]. Expand dimensions so it's [1,h,w,ch] so it can be fed to inference
-    decoded_img = tf.expand_dims(decoded_img, 0)
-    image = sess.run(decoded_img)
+    image = tf.expand_dims(decoded_img, 0).eval()
 
     # Calculate the predicted class-scores (aka. probabilities)
     pred = Y.eval(feed_dict={X: image, pkeep: 1.0})
@@ -90,11 +89,9 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=3.0, required_sc
 
     # Predicted class-number, argmax returns 0 or 1 so +1 for 1 or 2, which is our class numbers
     cls_source = np.argmax(pred) + 1
-    print("Predicted class num: {}".format(cls_source))
-
     # Score for the predicted class (aka. probability or confidence).
     score_source_org = pred.max()
-    print("Current confidence: {}".format(score_source_org))
+    print("Original image is predicted as Class {} with a confidence of {}".format(cls_source, score_source_org))
 
     # Names for the source and target classes.
     name_source = "stop"
@@ -114,37 +111,31 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=3.0, required_sc
         # Ensure the pixel-values of the noisy image are between
         # 0 and 255 like a real image. If we allowed pixel-values
         # outside this range then maybe the mis-classification would
-        # be due to this 'illegal' input breaking the Inception model.
-        noisy_image = tf.to_int32(noisy_image, name="toInt")
-        noisy_image = tf.clip_by_value(noisy_image, 0, 255)
-
-        noisy_image = sess.run(noisy_image)
+        # be due to this 'illegal' input breaking the model.
+        noisy_image = tf.clip_by_value(tf.to_int32(noisy_image), 0, 255).eval()
 
         # Calculate the predicted class-scores as well as the gradient.
         pred = Y.eval(feed_dict={X: noisy_image, pkeep: 1.0})
 
 
-        loss = sess.run(adversarial_loss, feed_dict={X: noisy_image, pkeep: 1.0, Y_: tgt_label})
-        print(loss)
+        loss = sess.run(adv_loss, feed_dict={X: noisy_image, pkeep: 1.0, Y_: tgt_label})
+        print("The current loss is: {}".format(loss))
 
         grad = sess.run(gradient, feed_dict={X: noisy_image, pkeep: 1.0, Y_: tgt_label})
+
 
         # Convert the predicted class-scores to a one-dim array.
         pred = np.squeeze(pred)
 
-        print("Pred: {}".format(pred))
+        print("Current Prediction for noisy image: {}".format(pred))
 
         # The scores (probabilities) for the source and target classes.
         # -1 to get back in the range 0 or 1, (our classes are 1 and 2)
         score_source = pred[cls_source-1]
         score_target = pred[cls_target-1]
 
-        print("Score_source: {}".format(score_source))
-        print("Score_target: {}".format(score_target))
-
         # Squeeze the dimensionality for the gradient-array.
         grad = np.array(grad).squeeze()
-
 
         # The gradient now tells us how much we need to change the
         # noisy input image in order to move the predicted class
@@ -153,6 +144,7 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=3.0, required_sc
         # Calculate the max of the absolute gradient values.
         # This is used to calculate the step-size.
         grad_absmax = np.abs(grad).max()
+        print("Gradient abs Max: {}".format(grad_absmax))
 
         # If the gradient is very small then use a lower limit,
         # because we will use it as a divisor.
@@ -163,7 +155,7 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=3.0, required_sc
         # This ensures that at least one pixel colour is changed by 7.
         # Recall that pixel colours can have 255 different values.
         # This step-size was found to give fast convergence.
-        step_size = 7/grad_absmax
+        step_size = 8/grad_absmax
 
         # Print the score etc. for the source-class.
         msg = "Source score: {0:>7.2%}, class-number: {1:>4}, class-name: {2}"
@@ -188,7 +180,9 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=3.0, required_sc
 
             # Ensure the noise is within the desired range.
             # This avoids distorting the image too much.
-            noise = np.clip(a=noise, a_min=-noise_limit, a_max=noise_limit)
+            noise = np.clip(a=noise,
+                            a_min=-noise_limit,
+                            a_max=noise_limit)
         else:
             # Abort the optimization because the score is high enough.
             break
@@ -199,11 +193,9 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=3.0, required_sc
 
 
 
-
 with tf.device('/cpu:0'):
     imageBatch, labelBatch = input.distorted_image_batch(DATA_PATH+"train-00000-of-00001")
     vimageBatch, vlabelBatch = input.distorted_image_batch(DATA_PATH+"validation-00000-of-00001")
-
 
 
 # get references to various model component tensors
@@ -217,9 +209,8 @@ accuracy = model.accuracy(logits, Y_)
 train_step = model.optimize(model_loss, lr)
 
 
-cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y_)
-cross_entropy = tf.reduce_mean(cross_entropy, name="cross_entropy")
-adv_train_step = tf.train.AdamOptimizer(lr).minimize(cross_entropy)
+adv_loss = model.loss(logits, Y_, mean=False)
+gradient = tf.gradients(adv_loss, X)
 
 
 sess = tf.InteractiveSession()
@@ -229,7 +220,7 @@ threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
 
 # start training
-nSteps = 100
+nSteps = 400
 for i in range(nSteps):
 
     batch_xs, batch_ys = sess.run([imageBatch, labelBatch])
@@ -242,27 +233,16 @@ for i in range(nSteps):
         print("step {}, training accuracy {}".format(i+1, train_acc))
 
 
-
-file_name = random.choice(os.listdir(DATA_PATH+"train/stop/"))
-image_data = tf.gfile.FastGFile(DATA_PATH+"train/stop/"+file_name, 'rb').read()
-
-
-image = input.decode_jpeg(image_data)
+image, label = input.get_stop_image("stop (286).jpg")
 image, adv_img, noise, name_src, name_target, score_src, score_source_org, score_target = find_adversary_noise(image)
-
-tf.summary.image("adversarial_example", adv_img, 1)
-
 
 image = tf.expand_dims(image, 0)
 adv_img = tf.expand_dims(adv_img, 0)
 
-
-
 img_pred = Y.eval(feed_dict={X:image.eval(), pkeep:1.0})
 adv_pred = Y.eval(feed_dict={X:adv_img.eval(), pkeep:1.0})
 
-
-print("Image is classed as: Class {}".format(img_pred))
+print("Original Image is classed as: Class {}".format(img_pred))
 print("Adversarial_Image is classed as: Class {}".format(adv_pred))
 
 # finalise

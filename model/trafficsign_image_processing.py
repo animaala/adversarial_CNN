@@ -94,14 +94,13 @@ def parse_tfrecord_file(path_to_file):
     return features['image/encoded'], label, features['image/class/text']
 
 
-def parse_single_image():
+def parse_single_image(file_name):
     """Parses a single JPEG image located in the train/stop/ directory.
     This is hardcoded in.
     Returns:
         String literal
     """
-    file_name = random.choice(os.listdir(DATA_PATH+"train/stop/"))
-    image_data = tf.gfile.FastGFile(DATA_PATH+"train/stop/"+file_name, 'rb').read()
+    image_data = tf.gfile.FastGFile(DATA_PATH+"validation/stop/"+file_name, 'rb').read()
     label = 2
     return image_data, label
 
@@ -221,13 +220,13 @@ def distorted_image_batch(path_to_file):
 
 
 
-def random_stop_image():
+def get_stop_image(file_name):
     """Get a random 'Stop' class image from the training set.
     :returns:
         image: 3-D Tensor: A random image from the Stop class
         label: The accompanying label
     """
-    image_buffer, label = parse_single_image()
+    image_buffer, label = parse_single_image(file_name)
     image = decode_jpeg(image_buffer)
     return image, label
 

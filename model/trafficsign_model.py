@@ -65,7 +65,7 @@ def train(X, Y_, pkeep, lr):
 
 
 
-def loss(logits, Y_):
+def loss(logits, Y_, mean=True):
     """Computes cross entropy loss on the unscaled logits from model
     normalised for batches of BATCH_SIZE images.
     Add summary for cross entropy.
@@ -74,7 +74,8 @@ def loss(logits, Y_):
     :return: Loss tensor of type float
     """
     cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y_)
-    cross_entropy = tf.reduce_mean(cross_entropy, name="cross_entropy") * BATCH_SIZE
+    if mean:
+        cross_entropy = tf.reduce_mean(cross_entropy, name="cross_entropy") * BATCH_SIZE
     tf.summary.scalar("x-ent", cross_entropy)
     return cross_entropy
 
