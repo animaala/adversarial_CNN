@@ -3,8 +3,6 @@
 # A Convolutional Neural Network binary classifier implementation designed
 # to work with a custom road traffic sign data set.
 #
-# **Create adversarial example from a randomly selected image**
-#
 # Implemented in Python 3.5, TF v1.1, CuDNN 5.1
 #
 # Ryan Halliburton 2017
@@ -14,13 +12,14 @@
 # 2. https://gitlab.ncl.ac.uk/securitylab/adversarial_ML.git
 #
 ########################################################################
+"""Create adversarial example from a randomly selected image
 
+"""
 import tensorflow as tf
 import trafficsign_image_processing as input
 import trafficsign_model as model
 import numpy as np
 import os
-import random
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1' # filter out INFO, keep WARNING+
 
 ########################################################################
@@ -53,14 +52,11 @@ with tf.name_scope("inputs"):
     lr = tf.placeholder(tf.float32, name="learning_rate")
     # Probability of keeping a node during dropout = 1.0 at test time (no dropout) and 0.5 at training time
     pkeep = tf.placeholder(tf.float32, name="dropout_prob")
-    # placeholder for the adversarial target class, which will be 1, i.e. "go"
-    cls_target_pl = tf.placeholder(dtype=tf.int32)
-    tf.summary.image("image", X, 3)
 
 ########################################################################
 
 
-def find_adversary_noise(decoded_img, cls_target=1, noise_limit=4.0, required_score=0.95, max_iterations=100):
+def find_adversary_noise(decoded_img, cls_target=1, noise_limit=4.0, required_score=0.95, max_iterations=150):
     """Find the noise that must be added to the given
     image so that it is classified as the target-class.
     :param image: Input image which will be altered into adversarial example. Must have dtype=int32
@@ -80,6 +76,7 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=4.0, required_sc
 
     # input image is [h,w,channels]. Expand dimensions so it's [1,h,w,ch] so it can be fed to inference
     image = tf.expand_dims(decoded_img, 0).eval()
+    tf.summary.image("adversarial_input", image, 1)
 
     # Calculate the predicted class-scores (aka. probabilities)
     pred = Y.eval(feed_dict={X: image, pkeep: 1.0})
@@ -186,11 +183,20 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=4.0, required_sc
         else:
             # Abort the optimization because the score is high enough.
             break
+    tf.summary.image("Adversarial_Example", noisy_image, 1)
+    tf.summary.image("Adversarial_Noise", noise, 1)
 
-    return image.squeeze(), noisy_image.squeeze(), noise, \
-           name_source, name_target, \
-           score_source, score_source_org, score_target
+    return image.squeeze(), noisy_image.squeeze(), noise
 
+
+
+def normalize_image(scope, x):
+    # Get the min and max values for all pixels in the input.
+    x_min = tf.reduce_min(x)
+    x_max = tf.reduce_max(x)
+    # Normalize so all values are between 0.0 and 1.0
+    x_norm = (x-x_min)/(x_max-x_min)
+    return x_norm
 
 
 with tf.device('/cpu:0'):
@@ -199,18 +205,19 @@ with tf.device('/cpu:0'):
 
 
 # get references to various model component tensors
-logits = model.inference(X, pkeep)
-Y = tf.nn.softmax(logits)
-# compute cross entropy loss on the logits
-model_loss = model.loss(logits, Y_)
-# get accuracy of logits with the ground truth
-accuracy = model.accuracy(logits, Y_)
-# Build a Graph that trains the model with one batch of examples and updates the model parameters.
-train_step = model.optimize(model_loss, lr)
+with tf.name_scope("the_model"):
+    logits = model.inference(X, pkeep)
+    Y = tf.nn.softmax(logits)
+    # compute cross entropy loss on the logits
+    model_loss = model.loss(logits, Y_)
+    # get accuracy of logits with the ground truth
+    accuracy = model.accuracy(logits, Y_)
+    # Build a Graph that trains the model with one batch of examples and updates the model parameters.
+    train_step = model.train(model_loss, lr)
 
-
-adv_loss = model.loss(logits, Y_, mean=False)
-gradient = tf.gradients(adv_loss, X)
+with tf.name_scope("adversarial_crafting"):
+    adv_loss = model.loss(logits, Y_, mean=False)
+    gradient = tf.gradients(adv_loss, X)
 
 
 sess = tf.InteractiveSession()
@@ -218,15 +225,19 @@ sess.run(tf.global_variables_initializer())
 coord = tf.train.Coordinator()
 threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
+writer = tf.summary.FileWriter("./traffic_graph/main", sess.graph)
+merged_summary = tf.summary.merge_all()
 
 # start training
-nSteps = 400
+nSteps = 200
 for i in range(nSteps):
 
     batch_xs, batch_ys = sess.run([imageBatch, labelBatch])
 
     # train_step is the backpropagation step. Running this op allows the network to learn the distribution of the data
     train_step.run(feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
+#    s, t = sess.run([merged_summary, train_step], feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
+#    writer.add_summary(s, i)
 
     if (i+1)%50 == 0:  # work out training accuracy and log summary info for tensorboard
         train_acc = sess.run(accuracy, feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
@@ -234,7 +245,7 @@ for i in range(nSteps):
 
 
 image, label = input.get_stop_image("stop (286).jpg")
-image, adv_img, noise, name_src, name_target, score_src, score_source_org, score_target = find_adversary_noise(image)
+image, adv_img, noise = find_adversary_noise(image)
 
 image = tf.expand_dims(image, 0)
 adv_img = tf.expand_dims(adv_img, 0)
