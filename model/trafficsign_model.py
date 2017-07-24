@@ -67,7 +67,7 @@ def _visualise_kernel(W):
     # to tf.image_summary format [batch_size, height, width, channels]
     kernel_transposed = tf.transpose(W_0_to_1, [3, 0, 1, 2])
     # this will display random 3 filters from the 128 in conv1
-    tf.summary.image('conv1', kernel_transposed, 3)
+    tf.summary.image('kernel1', kernel_transposed, 3)
 
 
 def _hidden_layer(images, kernel, bias, pkeep):
@@ -101,7 +101,7 @@ def _activation_summary(x):
     tf.summary.scalar('sparsity', tf.nn.zero_fraction(x))
 
 
-def inference(images, pkeep):
+def inference(images, pkeep, name="inference_"):
     """Builds the Traffic_Sign model.
     Note this model outputs the logits, NOT softmax. If softmax is needed apply it
     to the logits after the function call.
@@ -114,10 +114,11 @@ def inference(images, pkeep):
     Args:
       images: 4-D Tensor of images with shape -> [BATCH_SIZE, HEIGHT, WIDTH, NUM_CHANNELS]
       pkeep: Float: Dropout probability e.g. 0.5
+      name: String: the scope name of this function
     Returns:
-      logits: the unscaled log probabilities
+      logits: the unscaled log probabilities (pre softmax predictions)
     """
-    with tf.name_scope("inference"):
+    with tf.name_scope(name):
         # 2 convolutional layers with their channel counts, and a
         # fully connected layer (the last layer has 2 softmax neurons for "stop" and "go")
         J = 128   # 1st convolutional layer output channels
@@ -137,25 +138,25 @@ def inference(images, pkeep):
         B3 = tf.Variable(tf.constant(0.1, tf.float32, [N]))
         B4 = tf.Variable(tf.constant(0.1, tf.float32, [NUM_CLASSES]))
 
-        _visualise_kernel(W1)
+ #       _visualise_kernel(W1)
 
         # First conv layer, 72x72 images
         Y1 = _hidden_layer(images, W1, B1, pkeep)
-        _activation_summary(Y1)
+#        _activation_summary(Y1)
 
         # Second conv layer, 24x24 images
         Y2 = _hidden_layer(Y1, W2, B2, pkeep)
-        _activation_summary(Y2)
+#        _activation_summary(Y2)
 
         # First FC layer, 8x8 images
         YY = tf.reshape(Y2, shape=[-1, 8 * 8 * K])
         Y3 = tf.nn.relu(tf.matmul(YY, W3) + B3)
-        _activation_summary(Y3)
+ #       _activation_summary(Y3)
 
         # Softmax layer (we don't return softmax, returns the logits)
         YY4 = tf.nn.dropout(Y3, pkeep)
         logits = tf.matmul(YY4, W4) + B4
-        _activation_summary(logits)
+#        _activation_summary(logits)
         return logits
 
 
@@ -173,7 +174,7 @@ def loss(logits, Y_, mean=True):
     cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y_)
     if mean:
         cross_entropy = tf.reduce_mean(cross_entropy, name="cross_entropy") * BATCH_SIZE
-        tf.summary.scalar("x-ent", cross_entropy)
+ #       tf.summary.scalar("x-ent", cross_entropy)
     return cross_entropy
 
 
@@ -188,9 +189,9 @@ def accuracy(logits, Y_):
     """
     Y = tf.nn.softmax(logits)
     correct_prediction = tf.equal(tf.argmax(Y, 1), tf.argmax(Y_, 1))
-    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-    tf.summary.scalar("accuracy", accuracy)
-    return accuracy
+    acc = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+#    tf.summary.scalar("accuracy", acc)
+    return acc
 
 
 def train(loss, lr):
@@ -208,7 +209,7 @@ def train(loss, lr):
     grads = opt.compute_gradients(loss)
     train_step = opt.apply_gradients(grads)
     # Add histograms for gradients.
-    for grad, var in grads:
-        if grad is not None:
-            tf.summary.histogram(var.op.name + '/gradients', grad)
+ #   for grad, var in grads:
+#        if grad is not None:
+#            tf.summary.histogram(var.op.name + '/gradients', grad)
     return train_step

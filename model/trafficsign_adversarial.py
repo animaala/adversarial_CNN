@@ -42,32 +42,21 @@ NUM_CHANNELS = model.NUM_CHANNELS
 
 ########################################################################
 
-# Placeholders for data we will populate later
-with tf.name_scope("inputs"):
-    # input X: 72*72*3 pixel images, the first dimension (None) will index the images in the mini-batch
-    X = tf.placeholder(tf.float32, [None, HEIGHT, WIDTH, NUM_CHANNELS], name="images")
-    # similarly, we have a placeholder for true outputs (obtained from labels)
-    Y_ = tf.placeholder(tf.float32, [None, NUM_CLASSES], name="labels")
-    # variable learning rate
-    lr = tf.placeholder(tf.float32, name="learning_rate")
-    # Probability of keeping a node during dropout = 1.0 at test time (no dropout) and 0.5 at training time
-    pkeep = tf.placeholder(tf.float32, name="dropout_prob")
 
-########################################################################
+def find_adversary_noise(image, cls_target=1, noise_limit=12.0, required_score=0.99, max_iterations=150):
+    """Find noise which can be added to the given image so that it is classified as the target-class.
 
-
-def find_adversary_noise(decoded_img, cls_target=1, noise_limit=4.0, required_score=0.95, max_iterations=150):
-    """Find the noise that must be added to the given
-    image so that it is classified as the target-class.
-    :param image: Input image which will be altered into adversarial example. Must have dtype=int32
-    shape [height, width, channels]
-    :param cls_target: The target class we wish the image to become. Our classes are go:1 and stop:2.
-    However the softmax_cross_entropy functions require 0 and 1.. so minus 1 from each class number.
-    i.e. class go=0 and class stop=1
-    :param noise_limit: Limit for pixel-values in the noise
-    :param required_score: Stop when target-class confidence reaches this
-    :param max_iterations: Max number of optimization iterations to perform
-    :return:
+    Args:
+      image: 3-D Image which will be altered into an adversarial example. Must have dtype=int32.
+      with shape -> [HEIGHT, WIDTH, NUM_CHANNELS].
+      cls_target: The target class for the image. Our classes are go:1 and stop:2.
+      noise_limit: A limit for change in pixel-values for a single iteration.
+      required_score: Confidence level in prediction.
+      max_iterations: Max number of optimization iterations to perform.
+    Returns:
+      image: The original 4-D image with shape -> [1, HEIGHT, WIDTH, NUM_CHANNELS].
+      noisy_image: The 4-D adversarial example.
+      noise: The 4-D perturbed noise which created the adversarial example.
     """
 
     label = tf.stack(tf.one_hot(cls_target-1, NUM_CLASSES))
@@ -75,11 +64,11 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=4.0, required_sc
     tgt_label = label.eval()
 
     # input image is [h,w,channels]. Expand dimensions so it's [1,h,w,ch] so it can be fed to inference
-    image = tf.expand_dims(decoded_img, 0).eval()
-    tf.summary.image("adversarial_input", image, 1)
+    image = tf.expand_dims(image, 0)
 
     # Calculate the predicted class-scores (aka. probabilities)
-    pred = Y.eval(feed_dict={X: image, pkeep: 1.0})
+    with tf.name_scope("adv_input"):
+        pred = Y.eval(feed_dict={X: image.eval(), pkeep: 1.0})
 
     # Convert to one-dimensional array. i.e. from 'softmax:0' -> [[  5.19299786e-17   1.00000000e+00]]
     pred = np.squeeze(pred)                # to                  [  5.19299786e-17   1.00000000e+00]
@@ -103,7 +92,7 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=4.0, required_sc
         print("Iteration:", i)
 
         # The noisy image is just the sum of the input image and noise.
-        noisy_image = image+noise
+        noisy_image = image.eval()+noise
 
         # Ensure the pixel-values of the noisy image are between
         # 0 and 255 like a real image. If we allowed pixel-values
@@ -152,7 +141,7 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=4.0, required_sc
         # This ensures that at least one pixel colour is changed by 7.
         # Recall that pixel colours can have 255 different values.
         # This step-size was found to give fast convergence.
-        step_size = 8/grad_absmax
+        step_size = 11/grad_absmax
 
         # Print the score etc. for the source-class.
         msg = "Source score: {0:>7.2%}, class-number: {1:>4}, class-name: {2}"
@@ -183,10 +172,7 @@ def find_adversary_noise(decoded_img, cls_target=1, noise_limit=4.0, required_sc
         else:
             # Abort the optimization because the score is high enough.
             break
-    tf.summary.image("Adversarial_Example", noisy_image, 1)
-    tf.summary.image("Adversarial_Noise", noise, 1)
-
-    return image.squeeze(), noisy_image.squeeze(), noise
+    return image, noisy_image
 
 
 
@@ -198,6 +184,23 @@ def normalize_image(scope, x):
     x_norm = (x-x_min)/(x_max-x_min)
     return x_norm
 
+
+########################################################################
+
+# Placeholders for data we will populate later
+with tf.name_scope("inputs"):
+    # input X: 72*72*3 pixel images, the first dimension (None) will index the images in the mini-batch
+    X = tf.placeholder(tf.float32, [None, HEIGHT, WIDTH, NUM_CHANNELS], name="X_images")
+    tf.summary.image("Inputs", X, 3)
+    # similarly, we have a placeholder for true outputs (obtained from labels)
+    Y_ = tf.placeholder(tf.float32, [None, NUM_CLASSES], name="labels")
+    # variable learning rate
+    lr = tf.placeholder(tf.float32, name="learning_rate")
+    # Probability of keeping a node during dropout = 1.0 at test time (no dropout) and 0.5 at training time
+    pkeep = tf.placeholder(tf.float32, name="dropout_prob")
+
+
+########################################################################
 
 with tf.device('/cpu:0'):
     imageBatch, labelBatch = input.distorted_image_batch(DATA_PATH+"train-00000-of-00001")
@@ -217,6 +220,7 @@ with tf.name_scope("the_model"):
 
 with tf.name_scope("adversarial_crafting"):
     adv_loss = model.loss(logits, Y_, mean=False)
+    tf.summary.histogram("adv_x-ent", adv_loss)
     gradient = tf.gradients(adv_loss, X)
 
 
@@ -225,19 +229,22 @@ sess.run(tf.global_variables_initializer())
 coord = tf.train.Coordinator()
 threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-writer = tf.summary.FileWriter("./traffic_graph/main", sess.graph)
-merged_summary = tf.summary.merge_all()
+writer = tf.summary.FileWriter("./traffic_graph/adv_crafting", sess.graph)
+
+
+
 
 # start training
-nSteps = 200
+nSteps = 3000
 for i in range(nSteps):
 
     batch_xs, batch_ys = sess.run([imageBatch, labelBatch])
 
     # train_step is the backpropagation step. Running this op allows the network to learn the distribution of the data
     train_step.run(feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
-#    s, t = sess.run([merged_summary, train_step], feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
-#    writer.add_summary(s, i)
+#    if(i+1)%5 == 0:
+#        s = summary.eval(feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
+#        writer.add_summary(s, i)
 
     if (i+1)%50 == 0:  # work out training accuracy and log summary info for tensorboard
         train_acc = sess.run(accuracy, feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
@@ -245,16 +252,22 @@ for i in range(nSteps):
 
 
 image, label = input.get_stop_image("stop (286).jpg")
-image, adv_img, noise = find_adversary_noise(image)
+image, adv_image = find_adversary_noise(image)
 
-image = tf.expand_dims(image, 0)
-adv_img = tf.expand_dims(adv_img, 0)
+# create one-hot label
+label = tf.stack(tf.one_hot(label-1, NUM_CLASSES))
+# so label fits in Y_
+label = tf.reshape(label, [1, 2])
 
-img_pred = Y.eval(feed_dict={X:image.eval(), pkeep:1.0})
-adv_pred = Y.eval(feed_dict={X:adv_img.eval(), pkeep:1.0})
+tf.summary.image("Adversarial_Input", image, 1)
+tf.summary.image("Adversarial_Example", adv_image, 1)
 
-print("Original Image is classed as: Class {}".format(img_pred))
-print("Adversarial_Image is classed as: Class {}".format(adv_pred))
+
+summary = tf.summary.merge_all()
+
+s = summary.eval(feed_dict={X: image.eval(), Y_: label.eval(), pkeep:0.5})
+writer.add_summary(s)
+
 
 # finalise
 coord.request_stop()

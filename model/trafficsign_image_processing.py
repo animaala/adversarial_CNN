@@ -229,6 +229,7 @@ def create_batch(image, label):
     return image_batch, label_batch
 
 
+
 def parse_tfrecord_file(file_path):
     """Parses a TFRecord file containing serialized Example proto's containing images.
 
