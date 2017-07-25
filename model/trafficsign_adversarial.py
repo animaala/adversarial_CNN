@@ -67,8 +67,7 @@ def find_adversary_noise(image, cls_target=1, noise_limit=12.0, required_score=0
     image = tf.expand_dims(image, 0)
 
     # Calculate the predicted class-scores (aka. probabilities)
-    with tf.name_scope("adv_input"):
-        pred = Y.eval(feed_dict={X: image.eval(), pkeep: 1.0})
+    pred = Y.eval(feed_dict={X: image.eval(), pkeep: 1.0})
 
     # Convert to one-dimensional array. i.e. from 'softmax:0' -> [[  5.19299786e-17   1.00000000e+00]]
     pred = np.squeeze(pred)                # to                  [  5.19299786e-17   1.00000000e+00]
@@ -100,15 +99,9 @@ def find_adversary_noise(image, cls_target=1, noise_limit=12.0, required_score=0
         # be due to this 'illegal' input breaking the model.
         noisy_image = tf.clip_by_value(tf.to_int32(noisy_image), 0, 255).eval()
 
-        # Calculate the predicted class-scores as well as the gradient.
-        pred = Y.eval(feed_dict={X: noisy_image, pkeep: 1.0})
-
-
-        loss = sess.run(adv_loss, feed_dict={X: noisy_image, pkeep: 1.0, Y_: tgt_label})
+        # Calculate the predicted class-scores, loss and gradient.
+        pred, loss, grad = sess.run([Y, adv_loss, gradient], feed_dict={X: noisy_image, pkeep: 1.0, Y_: tgt_label})
         print("The current loss is: {}".format(loss))
-
-        grad = sess.run(gradient, feed_dict={X: noisy_image, pkeep: 1.0, Y_: tgt_label})
-
 
         # Convert the predicted class-scores to a one-dim array.
         pred = np.squeeze(pred)
@@ -122,6 +115,7 @@ def find_adversary_noise(image, cls_target=1, noise_limit=12.0, required_score=0
 
         # Squeeze the dimensionality for the gradient-array.
         grad = np.array(grad).squeeze()
+        adv_grads = tf.summary.histogram("adv_grads", grad)
 
         # The gradient now tells us how much we need to change the
         # noisy input image in order to move the predicted class
@@ -141,7 +135,7 @@ def find_adversary_noise(image, cls_target=1, noise_limit=12.0, required_score=0
         # This ensures that at least one pixel colour is changed by 7.
         # Recall that pixel colours can have 255 different values.
         # This step-size was found to give fast convergence.
-        step_size = 11/grad_absmax
+        step_size = 7/grad_absmax
 
         # Print the score etc. for the source-class.
         msg = "Source score: {0:>7.2%}, class-number: {1:>4}, class-name: {2}"
@@ -175,23 +169,12 @@ def find_adversary_noise(image, cls_target=1, noise_limit=12.0, required_score=0
     return image, noisy_image
 
 
-
-def normalize_image(scope, x):
-    # Get the min and max values for all pixels in the input.
-    x_min = tf.reduce_min(x)
-    x_max = tf.reduce_max(x)
-    # Normalize so all values are between 0.0 and 1.0
-    x_norm = (x-x_min)/(x_max-x_min)
-    return x_norm
-
-
 ########################################################################
 
 # Placeholders for data we will populate later
 with tf.name_scope("inputs"):
     # input X: 72*72*3 pixel images, the first dimension (None) will index the images in the mini-batch
     X = tf.placeholder(tf.float32, [None, HEIGHT, WIDTH, NUM_CHANNELS], name="X_images")
-    tf.summary.image("Inputs", X, 3)
     # similarly, we have a placeholder for true outputs (obtained from labels)
     Y_ = tf.placeholder(tf.float32, [None, NUM_CLASSES], name="labels")
     # variable learning rate
@@ -204,7 +187,8 @@ with tf.name_scope("inputs"):
 
 with tf.device('/cpu:0'):
     imageBatch, labelBatch = input.distorted_image_batch(DATA_PATH+"train-00000-of-00001")
-    vimageBatch, vlabelBatch = input.distorted_image_batch(DATA_PATH+"validation-00000-of-00001")
+    vimageBatch, vlabelBatch = input.image_batch(DATA_PATH+"validation-00000-of-00001")
+batch_summary = tf.summary.image("Inputs", imageBatch, 3)
 
 
 # get references to various model component tensors
@@ -220,8 +204,9 @@ with tf.name_scope("the_model"):
 
 with tf.name_scope("adversarial_crafting"):
     adv_loss = model.loss(logits, Y_, mean=False)
-    tf.summary.histogram("adv_x-ent", adv_loss)
+    adv_loss_summary = tf.summary.histogram("adv_x-ent", adv_loss)
     gradient = tf.gradients(adv_loss, X)
+
 
 
 sess = tf.InteractiveSession()
@@ -229,26 +214,47 @@ sess.run(tf.global_variables_initializer())
 coord = tf.train.Coordinator()
 threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-writer = tf.summary.FileWriter("./traffic_graph/adv_crafting", sess.graph)
+writer = tf.summary.FileWriter("./graph", sess.graph)
 
-
-
+# Below are tensors for summaries. Commented out tensors are for 2 or 3 layer convolutions.
+# If you implement 2/3 layer convolutions and want to check activation summaries, uncomment them
+# note, check /model/inference_layers for 1/2/3 layer convolution implementations.
+k1 = tf.get_default_graph().get_tensor_by_name("the_model/inference_/conv/kernel1:0")
+a0 = tf.get_default_graph().get_tensor_by_name("the_model/inference_/activations:0")
+s0 = tf.get_default_graph().get_tensor_by_name("the_model/inference_/sparsity:0")
+a1 = tf.get_default_graph().get_tensor_by_name("the_model/inference_/activations_1:0")
+s1 = tf.get_default_graph().get_tensor_by_name("the_model/inference_/sparsity_1:0")
+a2 = tf.get_default_graph().get_tensor_by_name("the_model/inference_/activations_2:0")
+s2 = tf.get_default_graph().get_tensor_by_name("the_model/inference_/sparsity_2:0")
+#a3 = tf.get_default_graph().get_tensor_by_name("the_model/inference_/activations_3:0")
+#s3 = tf.get_default_graph().get_tensor_by_name("the_model/inference_/sparsity_3:0")
+model_loss = tf.get_default_graph().get_tensor_by_name("the_model/x-ent:0")
+model_acc = tf.get_default_graph().get_tensor_by_name("the_model/accuracy:0")
+#training_grads = tf.get_default_graph().get_tensor_by_name("the_model/the_model/inference_/Variable_7/gradients:0")
+# summary = tf.summary.merge([batch_summary, k1, a0, s0, a1, s1, a2, s2, a3, s3, model_loss, model_acc, training_grads])
+summary = tf.summary.merge([batch_summary, k1, a0, s0, a1, s1, a2, s2, model_loss, model_acc])
 
 # start training
-nSteps = 3000
+nSteps = 800
 for i in range(nSteps):
 
     batch_xs, batch_ys = sess.run([imageBatch, labelBatch])
+    vbatch_xs, vbatch_ys = sess.run([vimageBatch, vlabelBatch])
 
     # train_step is the backpropagation step. Running this op allows the network to learn the distribution of the data
-    train_step.run(feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
-#    if(i+1)%5 == 0:
-#        s = summary.eval(feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
-#        writer.add_summary(s, i)
+    train_step.run(feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0015, pkeep:0.5})
+    if(i+1)%5 == 0:
+       s = summary.eval(feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0015, pkeep:1.0})
+       writer.add_summary(s, i)
 
     if (i+1)%50 == 0:  # work out training accuracy and log summary info for tensorboard
-        train_acc = sess.run(accuracy, feed_dict={X:batch_xs, Y_:batch_ys, lr:0.0008, pkeep:0.5})
+        train_acc = sess.run(accuracy, feed_dict={X:batch_xs, Y_:batch_ys, pkeep:1.0})
         print("step {}, training accuracy {}".format(i+1, train_acc))
+
+    # if (i+1)%100 == 0:  # work out training accuracy and log summary info for tensorboard
+    #     test_acc = sess.run(accuracy, feed_dict={X:vbatch_xs, Y_:vbatch_ys, lr:0.0008, pkeep:0.5})
+    #     print("step {}, validation accuracy {}".format(i+1, test_acc))
+
 
 
 image, label = input.get_stop_image("stop (286).jpg")
@@ -259,15 +265,14 @@ label = tf.stack(tf.one_hot(label-1, NUM_CLASSES))
 # so label fits in Y_
 label = tf.reshape(label, [1, 2])
 
-tf.summary.image("Adversarial_Input", image, 1)
-tf.summary.image("Adversarial_Example", adv_image, 1)
+input_summary = tf.summary.image("Adversarial_Input", image, 1)
+example_summary = tf.summary.image("Adversarial_Example", adv_image, 1)
 
-
-summary = tf.summary.merge_all()
+summary = tf.summary.merge([adv_loss_summary, input_summary, example_summary])
 
 s = summary.eval(feed_dict={X: image.eval(), Y_: label.eval(), pkeep:0.5})
 writer.add_summary(s)
-
+writer.close()
 
 # finalise
 coord.request_stop()

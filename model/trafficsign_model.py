@@ -67,7 +67,7 @@ def _visualise_kernel(W):
     # to tf.image_summary format [batch_size, height, width, channels]
     kernel_transposed = tf.transpose(W_0_to_1, [3, 0, 1, 2])
     # this will display random 3 filters from the 128 in conv1
-    tf.summary.image('kernel1', kernel_transposed, 3)
+    tf.summary.image('conv/kernel1', kernel_transposed, 3)
 
 
 def _hidden_layer(images, kernel, bias, pkeep):
@@ -106,9 +106,11 @@ def inference(images, pkeep, name="inference_"):
     Note this model outputs the logits, NOT softmax. If softmax is needed apply it
     to the logits after the function call.
 
-    There are 2 convolution layers with kernel shape:
-    [filter_height, filter_width, in_channels, out_channels].
-    And 2 fully connected layers, one to bring all the activation maps together
+    (Depending which inference model is being run, there can be 1/2/3 convolution layers.
+    Check /model/inference_layers for implementation.)
+
+    kernel shape -> [filter_height, filter_width, in_channels, out_channels].
+    There are 2 fully connected layers, one to bring all the activation maps together
     (outputs of all the filters) and one final softmax layer to predict the class.
 
     Args:
@@ -121,42 +123,38 @@ def inference(images, pkeep, name="inference_"):
     with tf.name_scope(name):
         # 2 convolutional layers with their channel counts, and a
         # fully connected layer (the last layer has 2 softmax neurons for "stop" and "go")
-        J = 128   # 1st convolutional layer output channels
-        K = 172   # 2nd convolutional layer output channels
+        J = 156   # 1st convolutional layer output channels
         N = 1536  # fully connected layer
 
         # weights / kernels
         # e.g. W1 = 7x7 patch, 3 input channel, J output channels
         W1 = tf.Variable(tf.truncated_normal([7, 7, NUM_CHANNELS, J], stddev=0.1))
-        W2 = tf.Variable(tf.truncated_normal([5, 5, J, K], stddev=0.1))
-        W3 = tf.Variable(tf.truncated_normal([8 * 8 * K, N], stddev=0.1))
-        W4 = tf.Variable(tf.truncated_normal([N, NUM_CLASSES], stddev=0.1))
+        W2 = tf.Variable(tf.truncated_normal([8*8*J, N], stddev=0.1))
+        W3 = tf.Variable(tf.truncated_normal([N, NUM_CLASSES], stddev=0.1))
 
         # biases
         B1 = tf.Variable(tf.constant(0.1, tf.float32, [J]))
-        B2 = tf.Variable(tf.constant(0.1, tf.float32, [K]))
-        B3 = tf.Variable(tf.constant(0.1, tf.float32, [N]))
-        B4 = tf.Variable(tf.constant(0.1, tf.float32, [NUM_CLASSES]))
+        B2 = tf.Variable(tf.constant(0.1, tf.float32, [N]))
+        B3 = tf.Variable(tf.constant(0.1, tf.float32, [NUM_CLASSES]))
 
- #       _visualise_kernel(W1)
+        _visualise_kernel(W1)
 
         # First conv layer, 72x72 images
         Y1 = _hidden_layer(images, W1, B1, pkeep)
-#        _activation_summary(Y1)
+        _activation_summary(Y1)
 
-        # Second conv layer, 24x24 images
-        Y2 = _hidden_layer(Y1, W2, B2, pkeep)
-#        _activation_summary(Y2)
+        # images are 24x24, max pool below will make them 8x8
+        Y2 = tf.nn.max_pool(Y1, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
 
         # First FC layer, 8x8 images
-        YY = tf.reshape(Y2, shape=[-1, 8 * 8 * K])
-        Y3 = tf.nn.relu(tf.matmul(YY, W3) + B3)
- #       _activation_summary(Y3)
+        YY = tf.reshape(Y2, shape=[-1, 8*8*J])
+        Y3 = tf.nn.relu(tf.matmul(YY, W2)+B2)
+        _activation_summary(Y3)
 
         # Softmax layer (we don't return softmax, returns the logits)
         YY4 = tf.nn.dropout(Y3, pkeep)
-        logits = tf.matmul(YY4, W4) + B4
-#        _activation_summary(logits)
+        logits = tf.matmul(YY4, W3)+B3
+        _activation_summary(logits)
         return logits
 
 
@@ -174,7 +172,7 @@ def loss(logits, Y_, mean=True):
     cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=Y_)
     if mean:
         cross_entropy = tf.reduce_mean(cross_entropy, name="cross_entropy") * BATCH_SIZE
- #       tf.summary.scalar("x-ent", cross_entropy)
+        tf.summary.scalar("x-ent", cross_entropy)
     return cross_entropy
 
 
@@ -190,7 +188,7 @@ def accuracy(logits, Y_):
     Y = tf.nn.softmax(logits)
     correct_prediction = tf.equal(tf.argmax(Y, 1), tf.argmax(Y_, 1))
     acc = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-#    tf.summary.scalar("accuracy", acc)
+    tf.summary.scalar("accuracy", acc)
     return acc
 
 
@@ -209,7 +207,7 @@ def train(loss, lr):
     grads = opt.compute_gradients(loss)
     train_step = opt.apply_gradients(grads)
     # Add histograms for gradients.
- #   for grad, var in grads:
-#        if grad is not None:
-#            tf.summary.histogram(var.op.name + '/gradients', grad)
+    for grad, var in grads:
+        if grad is not None:
+            tf.summary.histogram(var.op.name + '/gradients', grad)
     return train_step

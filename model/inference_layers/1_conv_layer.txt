@@ -1,0 +1,44 @@
+    with tf.name_scope(name):
+        # 2 convolutional layers with their channel counts, and a
+        # fully connected layer (the last layer has 2 softmax neurons for "stop" and "go")
+        # J = 128   # 1st convolutional layer output channels
+        # K = 172   # 2nd convolutional layer output channels
+        # N = 1536  # fully connected layer
+        J = 156   # 1st convolutional layer output channels
+#        K = 172   # 2nd convolutional layer output channels
+        N = 1536  # fully connected layer
+
+        # weights / kernels
+        # e.g. W1 = 7x7 patch, 3 input channel, J output channels
+        W1 = tf.Variable(tf.truncated_normal([7, 7, NUM_CHANNELS, J], stddev=0.1))
+   #     W2 = tf.Variable(tf.truncated_normal([5, 5, J, K], stddev=0.1))
+        W2 = tf.Variable(tf.truncated_normal([8 * 8 * J, N], stddev=0.1))
+        W3 = tf.Variable(tf.truncated_normal([N, NUM_CLASSES], stddev=0.1))
+
+        # biases
+        B1 = tf.Variable(tf.constant(0.1, tf.float32, [J]))
+   #     B2 = tf.Variable(tf.constant(0.1, tf.float32, [K]))
+        B2 = tf.Variable(tf.constant(0.1, tf.float32, [N]))
+        B3 = tf.Variable(tf.constant(0.1, tf.float32, [NUM_CLASSES]))
+
+        _visualise_kernel(W1)
+
+        # First conv layer, 72x72 images
+        Y1 = _hidden_layer(images, W1, B1, pkeep)
+        _activation_summary(Y1)
+
+        # Second conv layer, 24x24 images
+#        Y2 = _hidden_layer(Y1, W2, B2, pkeep)
+        Y2 = tf.nn.max_pool(Y1, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding="SAME")
+ #       _activation_summary(Y2)
+
+        # First FC layer, 8x8 images
+        YY = tf.reshape(Y2, shape=[-1, 8 * 8 * J])
+        Y3 = tf.nn.relu(tf.matmul(YY, W2) + B2)
+        _activation_summary(Y3)
+
+        # Softmax layer (we don't return softmax, returns the logits)
+        YY4 = tf.nn.dropout(Y3, pkeep)
+        logits = tf.matmul(YY4, W3) + B3
+        _activation_summary(logits)
+        return logits
