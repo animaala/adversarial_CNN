@@ -12,8 +12,9 @@
 # 2. https://gitlab.ncl.ac.uk/securitylab/adversarial_ML.git
 #
 ########################################################################
-"""Create adversarial example from a randomly selected image
-
+"""Create adversarial example from a randomly selected image, function which
+   generates adversarial noise was adapted from Hvass Laboratories tutorial:
+https://github.com/Hvass-Labs/TensorFlow-Tutorials/blob/master/11_Adversarial_Examples.ipynb
 """
 import tensorflow as tf
 import trafficsign_image_processing as input

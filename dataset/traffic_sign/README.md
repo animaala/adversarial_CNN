@@ -1,6 +1,6 @@
 ## Welcome to the Traffic Sign dataset
 
-The data is split 4 to 1 between ```/train``` and ```/validation```. This is slightly lower than the 6 to 1 split of the MNIST dataset. However data augmentation is used in the model to expand the training and test sets.
+The data is split 4 to 1 between ```/train``` and ```/validation```. This is slightly lower than the 6 to 1 split of the MNIST dataset. However data augmentation is used in the model to expand the training and test sets. Note you can follow the below instructions to create your own custom dataset for use with Tensorflow Convolutional Neural Networks.
 
 ### To create a dataset for Tensorflow to use:
 
@@ -34,3 +34,4 @@ python build_image_data.py --train_directory=./train --output_directory=./  \
 We have told the script where to find the input files, and labels, and it will create a file containing 
 all training images train-00000-of-00001 and another containing all validation images 
 validation-00000-of-00001 in TensorFlow TFRecord format. We can now use these to train and validate our model.
+

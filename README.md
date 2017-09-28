@@ -1,6 +1,6 @@
 # Adversarial machine learning
 
-This project explores adversarial machine learning. A convolutional neural network is used with a custom dataset of traffic signs to highlight the potential effects adversarial examples could have on self driving cars. The dataset consists of 2 classes *"Stop"* and *"Go"* ("Stop", "30mph").
+This project explores adversarial machine learning. A convolutional neural network is used with a custom dataset of traffic signs to highlight the potential effects adversarial examples could have on self driving cars. The dataset consists of 2 classes *"Stop"* and *"Go"* ("Stop", "30mph"). Note that the ```README.md``` file in ```/dataset/traffic_sign/``` has step by step instructions on how to create your own custom dataset for use with Tensorflow convolutional neural networks.
 
 ### Recommendations
 
